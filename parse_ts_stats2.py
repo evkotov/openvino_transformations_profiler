@@ -41,8 +41,8 @@ class Graph:
         self.__stripe_bounds = None
         self.__stripe_label = None
 
-    def add(self, x_values: List[int], y_values: List[float]):
-        self.__graphs.append((x_values, y_values))
+    def add(self, x_values: List[int], y_values: List[float], label: str):
+        self.__graphs.append((x_values, y_values, label))
 
     def set_stripe(self, lower_bound: float, upper_bound: float, label: str):
         self.__stripe_bounds = (lower_bound, upper_bound)
@@ -58,11 +58,13 @@ class Graph:
         #plt.figure(figsize=(20, 15))
         plt.figure(figsize=(8, 5))
 
-        first_x_values, first_y_values = self.__graphs[0]
+        first_x_values, first_y_values, label = self.__graphs[0]
         all_x_values = set(first_x_values)
         for graph_item in self.__graphs:
-            x_values, y_values = graph_item
-            plt.plot(x_values, y_values, marker='o')
+            x_values, y_values, label = graph_item
+            plt.plot(x_values, y_values, marker='o', label=label)
+            if label:
+                need_a_legend = True
             all_x_values.update(x_values)
         # Adding labels and title
         plt.title(self.__title)
@@ -483,16 +485,131 @@ def iteration_statistics_in_comparison(data: List[Dict[ModelInfo, ModelData]],
 
     return duration_deltas_stddev, duration_ratios_stddev
 
-UNIT_TYPE = 'transformation'
 
-csv_data = get_csv_data(sys.argv[1:])
+def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
+    if len(data) == 0:
+        return [], []
 
-for model_info in get_all_models(csv_data):
-    duration_deltas_stddev, duration_ratios_stddev = iteration_statistics_in_comparison(filter_by_models(csv_data,
+    n_cvs_files = len(data)
+    table = []
+    models = [model_info for model_info in data[0]]
+    for model_info in models:
+        row = [model_info]
+        compile_times = []
+        for csv_idx in range(n_cvs_files):
+            model_data = data[csv_idx][model_info]
+            compile_time = model_data.get_compile_time() / 1_000_000_000
+            compile_times.append(compile_time)
+        for csv_idx in range(n_cvs_files):
+            row.append(compile_times[csv_idx])
+        for csv_idx in range(1, n_cvs_files):
+            delta = compile_times[csv_idx] - compile_times[0]
+            row.append(delta)
+        for csv_idx in range(1, n_cvs_files):
+            ratio = compile_times[csv_idx] / compile_times[0]
+            row.append(ratio)
+        table.append(row)
+    return table
+
+
+def get_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]:
+    if len(data) == 0:
+        return []
+    common_keys = data[0].keys()
+    for csv_data in data:
+        common_keys = common_keys & csv_data.keys()
+    return common_keys
+
+
+def filter_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[Dict[ModelInfo, ModelData]]:
+    common_models: List[ModelInfo] = get_common_models(data)
+    return filter_by_models(data, common_models)
+
+
+def main_iteration_statistics_in_comparison():
+    UNIT_TYPE = 'transformation'
+    csv_data = get_csv_data(sys.argv[1:])
+
+    for model_info in get_all_models(csv_data):
+        duration_deltas_stddev, duration_ratios_stddev = iteration_statistics_in_comparison(filter_by_models(csv_data,
                                                                                                          [model_info]),
                                                                                         UNIT_TYPE)
-    assert len(duration_deltas_stddev) == len(duration_ratios_stddev)
-    assert 0.0 not in duration_deltas_stddev, f'{duration_deltas_stddev}'
-    gen_std_dev_graph_deltas(model_info, duration_deltas_stddev)
-    assert 0.0 not in duration_ratios_stddev, f'{duration_ratios_stddev}'
-    gen_std_dev_graph_ratio(model_info, duration_ratios_stddev)
+        assert len(duration_deltas_stddev) == len(duration_ratios_stddev)
+        assert 0.0 not in duration_deltas_stddev, f'{duration_deltas_stddev}'
+        gen_std_dev_graph_deltas(model_info, duration_deltas_stddev)
+        assert 0.0 not in duration_ratios_stddev, f'{duration_ratios_stddev}'
+        gen_std_dev_graph_ratio(model_info, duration_ratios_stddev)
+
+
+def compare_compile_time_for_series(inputs: List[str]) -> Dict[ModelInfo, List[float]]:
+    csv_data = get_csv_data(inputs)
+    csv_data_common_models = filter_common_models(csv_data)
+    if not csv_data_common_models:
+        print('no common models to compare compilation time ...')
+        return {}
+    rows = compare_compile_time(csv_data_common_models)
+    n_csv_files = len(inputs)
+    result = {}
+    for row in rows:
+        result[row[0]] = row[1:n_csv_files + 1]
+    return result
+
+
+def gen_compile_time_graph(model_info: ModelInfo, compile_time_series: List[Tuple[str, List[float]]]):
+    x_label = 'Dev trigger job run number'
+    y_label = 'Compilation time (secs)'
+
+    title = f'Compilation time {model_info.framework} {model_info.name} {model_info.precision}'
+    print(f'generate graph {title}')
+
+    graph = Graph(title, x_label, y_label)
+    for label, serie in compile_time_series:
+        iterations = list(range(1, len(serie) + 1))
+        graph.add(iterations, serie, label)
+
+    # median of first serie
+    median_value = float(np.median(compile_time_series[0][1]))
+    graph.set_x_line(median_value, f'Median {compile_time_series[0][0]}: {"%.2f" % median_value} secs')
+    deviation = 0.1 * median_value
+    lower_bound = median_value - deviation
+    upper_bound = median_value + deviation
+    graph.set_stripe(lower_bound, upper_bound, label='10% Deviation from the median')
+
+    path = f'compile_time_{model_info.framework}_{model_info.name}_{model_info.precision}.png'
+    graph.plot(path)
+
+
+def main_compare_compile_time_rpl_05_12():
+    inputs1 = ['C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_05_01.csv',
+              "C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_05_03.csv",
+              "C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_05_07.csv",
+              "C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_05_08.csv",
+              "C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_05_05.csv"]
+    inputs2 = ["C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_12_04.csv",
+               "C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_12_09.csv",
+               "C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_12_09.csv",
+               "C:\\Users\\ekotov\\WORK\\TO_DELETE\\Ivan_experiment3\\rpl_12_last.csv"]
+    series1 = compare_compile_time_for_series(inputs1)
+    series2 = compare_compile_time_for_series(inputs2)
+    for model_info, serie1 in series1.items():
+        serie2 = series2[model_info]
+        gen_compile_time_graph(model_info, [('rpl-05', serie1), ('rpl-12', serie2)])
+
+
+def main_compare_compile_time_my_jobs():
+    inputs = ['C:\\Users\\ekotov\\WORK\\TO_DELETE\\ov_transformations_stats_196.csv',
+              'C:\\Users\\ekotov\\WORK\\TO_DELETE\\ov_transformations_stats_197.csv',
+              'C:\\Users\\ekotov\\WORK\\TO_DELETE\\ov_transformations_stats_203.csv',
+              'C:\\Users\\ekotov\\WORK\\TO_DELETE\\ov_transformations_stats_204_dev_10_iter.csv',
+              'C:\\Users\\ekotov\\WORK\\TO_DELETE\\ov_transformations_stats_186.csv',
+              'C:\\Users\\ekotov\\WORK\\TO_DELETE\\ov_transformations_stats_191.csv',
+              'C:\\Users\\ekotov\\WORK\\TO_DELETE\\ov_transformations_stats_193.csv',
+              'C:\\Users\\ekotov\\WORK\\TO_DELETE\\ov_transformations_stats_193_new.csv']
+    series = compare_compile_time_for_series(inputs)
+    for model_info, serie in series.items():
+        gen_compile_time_graph(model_info, [('', serie)])
+
+
+if __name__ == '__main__':
+    #main_compare_compile_time_my_jobs()
+    main_compare_compile_time_rpl_05_12()
