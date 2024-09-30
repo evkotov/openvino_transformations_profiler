@@ -322,138 +322,6 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
         return max(delta_values)
     return header, sort_table(table, get_max_delta)
 
-'''
-# FIXME
-def find_longest_common_subsequence(list1: List[UnitInfo],
-                                    list2: List[UnitInfo]) -> List[List[int]]:
-    TransformationInfo = namedtuple('TransformationInfo',
-                                    ['type',
-                                     'transformation_name',
-                                     'manager_name'])
-
-    def get_ts_info(model_info_list: List[UnitInfo]) -> List[TransformationInfo]:
-        result = []
-        for item in model_info_list:
-            result.append(TransformationInfo(item.type,
-                                             item.transformation_name,
-                                             item.manager_name))
-        return result
-
-    list1 = get_ts_info(list1)
-    list2 = get_ts_info(list2)
-
-    n = len(list1)
-    m = len(list2)
-
-    # Create a (n+1) x (m+1) DP table initialized to 0
-    dp = [[0] * (m + 1) for _ in range(n + 1)]
-    # Fill the DP table
-    for i in range(1, n + 1):
-        for j in range(1, m + 1):
-            if list1[i - 1] == list2[j - 1]:
-                dp[i][j] = dp[i - 1][j - 1] + 1
-            else:
-                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
-
-    # Backtrack to find the LCS sequence
-    list1_indexes = []
-    list2_indexes = []
-    i, j = n, m
-    while i > 0 and j > 0:
-        if list1[i - 1] == list2[j - 1]:
-            list1_indexes.append(i - 1)
-            list2_indexes.append(j - 1)
-            i -= 1
-            j -= 1
-        elif dp[i - 1][j] > dp[i][j - 1]:
-            i -= 1
-        else:
-            j -= 1
-
-    # Since we are backtracking, the LCS is constructed backwards, reverse it
-    list1_indexes.reverse()
-    list2_indexes.reverse()
-
-    assert len(list1_indexes) == len(list2_indexes)
-
-    return [list1_indexes, list2_indexes]
-
-
-def create_durations_header(n_csv_files: int):
-    column_names = ['is not a common',
-                    'type',
-                    'transformation_name',
-                    'manager_name']
-    for i in range(n_csv_files):
-        column_names.append(f'duration #{i + 1} (milliseconds)')
-        if i > 0:
-            column_names.append(f'duration #{i + 1} to #1 ratio')
-    return column_names
-
-
-def compare_model_durations(data: List[Dict[ModelInfo, ModelData]],
-                            model_info: ModelInfo):
-    n_cvs_files = len(data)
-    assert n_cvs_files == 2
-    model_data_objs = [obj[model_info] for obj in data]
-    # get longest common subsequence of transformations
-    all_item_info1 = model_data_objs[0].get_all_item_info()
-    all_item_info2 = model_data_objs[1].get_all_item_info()
-    all_item_info_list = [all_item_info1, all_item_info2]
-    subsequence_indexes = find_longest_common_subsequence(all_item_info1,
-                                                          all_item_info2)
-    assert len(subsequence_indexes) == n_cvs_files
-    #
-    header = create_durations_header(n_cvs_files)
-    table = []
-
-    # add common subsequence to the table
-    for common_subsequence_idx in range(len(subsequence_indexes[0])):
-        item_info_ref = all_item_info_list[0][subsequence_indexes[0][common_subsequence_idx]]
-        row = ['',
-               item_info_ref.type,
-               item_info_ref.transformation_name,
-               item_info_ref.manager_name]
-        first_duration = None
-        for csv_idx in range(n_cvs_files):
-            subsequence = subsequence_indexes[csv_idx]
-            item_idx = subsequence[common_subsequence_idx]
-            duration = model_data_objs[csv_idx].get_duration(item_idx) / 1_000_000
-            row.append(duration)
-            if csv_idx == 0:
-                first_duration = duration
-            else:
-                row.append((duration - first_duration)/first_duration)
-        table.append(row)
-
-    # add non-common items to the table
-    for csv_idx in range(n_cvs_files):
-        subsequence = set(subsequence_indexes[csv_idx])
-        item_info_list = all_item_info_list[csv_idx]
-        for item_idx, item_info in enumerate(item_info_list):
-            if item_idx in subsequence:
-                # we already add this item as it is common
-                continue
-            row = ['true',
-                   item_info.type,
-                   item_info.transformation_name,
-                   item_info.manager_name]
-            for column_idx in range(n_cvs_files):
-                duration = 0.0
-                if column_idx == csv_idx:
-                    duration = model_data_objs[csv_idx].get_duration(item_idx) / 1_000_000
-                row.append(duration)
-                # add ratio
-                if column_idx > 0:
-                    row.append(0.0)
-            table.append(row)
-
-    def get_max_duration(row: List) -> float:
-        durations = [row[4]] + row[5::2]
-        return max(durations)
-    return header, sort_table(table, get_max_duration)
-'''
-
 
 def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
                      unit_type: str):
@@ -685,16 +553,6 @@ class CompareSumUnitsPerModel(DataProcessor):
             save_csv(header, table, file_name)
 
 
-'''
-# FIXME
-def generate_model_durations_csv(csv_data):
-    for model_info in get_all_models(csv_data):
-        header, table = compare_model_durations(csv_data, model_info)
-        file_name = file_name = make_model_file_name(model_info, 'duration_comparison')
-        save_csv(header, table, file_name)
-'''
-
-
 @dataclass
 class Config:
     compare_compile_time = None
@@ -790,11 +648,6 @@ def main(config: Config) -> None:
     if config.compare_managers_per_model:
         data_processors.append(CompareSumUnitsPerModel(config.compare_managers_per_model, unit_type='manager'))
 
-    '''
-    if len(csv_data) == 2:
-        print('comparing transformation and manager duration ...')
-        generate_model_durations_csv(csv_data)
-    '''
 
     if not data_processors:
         print('nothing to do ...')
