@@ -519,9 +519,10 @@ class Output(ABC):
 
 
 class CSVOutput(Output):
-    def __init__(self, path: str, header: List[str]):
+    def __init__(self, path: str, header: List[str], limit_output):
         super().__init__(header)
         self.path = path
+        self.limit_output = limit_output
         self.file = None
 
     def write_header(self):
@@ -533,6 +534,8 @@ class CSVOutput(Output):
         assert self.file is not None
         assert self.header is not None
         csv_writer = csv.DictWriter(self.file, fieldnames=self.header, delimiter=';')
+        if self.limit_output:
+            rows = rows[:self.limit_output]
         for row in rows:
             csv_writer.writerow(row)
 
@@ -546,9 +549,10 @@ class CSVOutput(Output):
 
 
 class ConsoleTableOutput(Output):
-    def __init__(self, header: List[str], description: str):
+    def __init__(self, header: List[str], description: str, limit_output):
         super().__init__(header)
         self.description = description
+        self.limit_output = limit_output
         self.file = None
 
     def write_header(self):
@@ -556,6 +560,8 @@ class ConsoleTableOutput(Output):
 
     def write(self, rows: List[Dict[str, str]]):
         assert self.header is not None
+        if self.limit_output:
+            rows = rows[:self.limit_output]
         print(self.description)
         ordered_rows_str = [{key: str(row[key]) for key in self.header} for row in rows]
         table = tabulate(ordered_rows_str, headers="keys")
@@ -578,21 +584,23 @@ class SingleOutputFactory(ABC):
 
 
 class CSVSingleFileOutputFactory(SingleOutputFactory):
-    def __init__(self, path: str):
+    def __init__(self, path: str, limit_output):
         super().__init__()
         self.path = path
+        self.limit_output = limit_output
 
     def create(self, header: List[str]):
-        return CSVOutput(self.path, header)
+        return CSVOutput(self.path, header, self.limit_output)
 
 
 class ConsoleTableSingleFileOutputFactory(SingleOutputFactory):
-    def __init__(self, description: str):
+    def __init__(self, description: str, limit_output):
         super().__init__()
         self.description = description
+        self.limit_output = limit_output
 
     def create(self, header: List[str]):
-        return ConsoleTableOutput(header, self.description)
+        return ConsoleTableOutput(header, self.description, self.limit_output)
 
 
 class MultiOutputFactory(ABC):
@@ -605,21 +613,23 @@ class MultiOutputFactory(ABC):
 
 
 class CSVMultiFileOutputFactory(MultiOutputFactory):
-    def __init__(self, prefix: str):
+    def __init__(self, prefix: str, limit_output):
         super().__init__()
         self.prefix = prefix
+        self.limit_output = limit_output
 
     def create(self, header: List[str], model_info: ModelInfo):
-        return CSVOutput(make_model_file_name(model_info, self.prefix), header)
+        return CSVOutput(make_model_file_name(model_info, self.prefix), header, self.limit_output)
 
 
 class ConsoleTableMultiOutputFactory(MultiOutputFactory):
-    def __init__(self, description: str):
+    def __init__(self, description: str, limit_output):
         super().__init__()
         self.description = description
+        self.limit_output = limit_output
 
     def create(self, header: List[str], model_info: ModelInfo):
-        return ConsoleTableOutput(header, make_model_console_description(model_info))
+        return ConsoleTableOutput(header, make_model_console_description(model_info), self.limit_output)
 
 
 class DataProcessor(ABC):
@@ -717,6 +727,7 @@ class Config:
     compare_managers_per_model = None
     output_type = 'csv'
     model_name = None
+    limit_output = None
     inputs: List[str] = field(default_factory=list)
 
 
@@ -865,7 +876,14 @@ If you want to get information only about models with specified model name,
 For example to dump only for models with name 'llama-3-8b',
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_managers_per_model --model_name llama-3-8b
 """)
-    args_parser.add_argument('--output_type', type=str, default='csv', help='csv or console')
+    args_parser.add_argument('--output_type', type=str, default='csv',
+                             help='csv or console')
+    args_parser.add_argument('--limit_output', type=int, default=None,
+                             help=f'''
+Output maximum number of rows
+For example, to output only first 15 rows in table
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_managers_overall --limit_output 15
+''')
 
     args = args_parser.parse_args()
 
@@ -894,19 +912,20 @@ For example to dump only for models with name 'llama-3-8b',
     config.compare_transformations_per_model = args.compare_transformations_per_model
     config.compare_managers_per_model = args.compare_managers_per_model
     config.model_name = args.model_name
+    config.limit_output = args.limit_output
 
     return config
 
 
-def create_single_output_factory(output_type: str, path: str, description: str):
+def create_single_output_factory(output_type: str, path: str, description: str, limit_output):
     if output_type == 'csv':
-        return CSVSingleFileOutputFactory(path)
-    return ConsoleTableSingleFileOutputFactory(description)
+        return CSVSingleFileOutputFactory(path, limit_output)
+    return ConsoleTableSingleFileOutputFactory(description, limit_output)
 
-def create_multi_output_factory(output_type: str, prefix: str, description: str):
+def create_multi_output_factory(output_type: str, prefix: str, description: str, limit_output):
     if output_type == 'csv':
-        return CSVMultiFileOutputFactory(prefix)
-    return ConsoleTableMultiOutputFactory(description)
+        return CSVMultiFileOutputFactory(prefix, limit_output)
+    return ConsoleTableMultiOutputFactory(description, limit_output)
 
 
 def main(config: Config) -> None:
@@ -914,47 +933,56 @@ def main(config: Config) -> None:
     if config.compare_compile_time:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.compare_compile_time,
-                                                      'compilation time')
+                                                      'compilation time',
+                                                      config.limit_output)
         data_processors.append(CompareCompileTime(output_factory))
     if config.transformations_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.transformations_overall,
-                                                      'transformations overall')
+                                                      'transformations overall',
+                                                      config.limit_output)
         data_processors.append(GenerateLongestUnitsOverall(output_factory, unit_type='transformation'))
     if config.manager_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.manager_overall,
-                                                      'managers overall')
+                                                      'managers overall',
+                                                      config.limit_output)
         data_processors.append(GenerateLongestUnitsOverall(output_factory, unit_type='manager'))
     if config.transformations_per_model:
         output_factory = create_multi_output_factory(config.output_type,
                                                      config.transformations_per_model,
-                                                     'transformations per model')
+                                                     'transformations per model',
+                                                     config.limit_output)
         data_processors.append(GenerateLongestUnitsPerModel(output_factory, unit_type='transformation'))
     if config.managers_per_model:
         output_factory = create_multi_output_factory(config.output_type,
                                                      config.managers_per_model,
-                                                     'managers per model')
+                                                     'managers per model',
+                                                     config.limit_output)
         data_processors.append(GenerateLongestUnitsPerModel(output_factory, unit_type='manager'))
     if config.compare_transformations_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.compare_transformations_overall,
-                                                      'compare transformations overall')
+                                                      'compare transformations overall',
+                                                      config.limit_output)
         data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='transformation'))
     if config.compare_managers_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.compare_managers_overall,
-                                                      'compare managers overall')
+                                                      'compare managers overall',
+                                                      config.limit_output)
         data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='manager'))
     if config.compare_transformations_per_model:
         output_factory = create_multi_output_factory(config.output_type,
                                                      config.compare_transformations_per_model,
-                                                     'compare transformations per model')
+                                                     'compare transformations per model',
+                                                     config.limit_output)
         data_processors.append(CompareSumUnitsPerModel(output_factory, unit_type='transformation'))
     if config.compare_managers_per_model:
         output_factory = create_multi_output_factory(config.output_type,
                                                      config.compare_managers_per_model,
-                                                     'compare managers per model')
+                                                     'compare managers per model',
+                                                     config.limit_output)
         data_processors.append(CompareSumUnitsPerModel(output_factory, unit_type='manager'))
 
 
