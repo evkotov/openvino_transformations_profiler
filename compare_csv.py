@@ -1,9 +1,11 @@
+from abc import ABC, abstractmethod
 import argparse
 from collections import namedtuple
 import csv
 from dataclasses import dataclass, field
 import os
 import sys
+from tabulate import tabulate
 from typing import List, Dict, Tuple, Generator, Set
 
 import numpy as np
@@ -265,7 +267,7 @@ def filter_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[Dict[Mo
     return filter_by_models(data, common_models)
 
 
-def sort_table(table: List[List], get_row_key_func) -> List[List]:
+def sort_table(table: List[Dict], get_row_key_func) -> List[Dict]:
     sorting_table: List[Tuple[int, float]] = []
     for row_idx, row in enumerate(table):
         sorting_table.append((row_idx, get_row_key_func(row)))
@@ -285,41 +287,49 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
                         'name',
                         'precision',
                         'optional model attribute']
-        for i in range(n_csv_files):
-            column_names.append(f'compile time #{i + 1} (secs)')
-        for i in range(1, n_csv_files):
-            column_names.append(f'compile time #{i + 1} - #1 (secs)')
-        for i in range(1, n_csv_files):
-            column_names.append(f'compile time #{i + 1}/#1')
+        for csv_idx in range(n_csv_files):
+            column_names.append(f'compile time #{csv_idx + 1} (secs)')
+        for csv_idx in range(1, n_csv_files):
+            column_names.append(f'compile time #{csv_idx + 1} - #1 (secs)')
+        for csv_idx in range(1, n_csv_files):
+            column_names.append(f'compile time #{csv_idx + 1}/#1')
         return column_names
+
+    def get_delta_header_names(n_csv_files: int) -> List[str]:
+        column_names = []
+        for csv_idx in range(1, n_csv_files):
+            column_names.append(f'compile time #{csv_idx + 1} - #1 (secs)')
+        return column_names
+
 
     n_cvs_files = len(data)
     header = create_header(n_cvs_files)
     table = []
     models = [model_info for model_info in data[0]]
     for model_info in models:
-        row = [model_info.framework,
-               model_info.name,
-               model_info.precision,
-               model_info.optional_attribute]
+        row = {'framework': model_info.framework,
+               'name': model_info.name,
+               'precision': model_info.precision,
+               'optional model attribute': model_info.optional_attribute}
         compile_times = []
         for csv_idx in range(n_cvs_files):
             model_data = data[csv_idx][model_info]
             compile_time = model_data.get_compile_time() / 1_000_000_000
             compile_times.append(compile_time)
         for csv_idx in range(n_cvs_files):
-            row.append(compile_times[csv_idx])
+            row[f'compile time #{csv_idx + 1} (secs)'] = compile_times[csv_idx]
         for csv_idx in range(1, n_cvs_files):
                 delta = compile_times[csv_idx] - compile_times[0]
-                row.append(delta)
+                row[f'compile time #{csv_idx + 1} - #1 (secs)'] = delta
         for csv_idx in range(1, n_cvs_files):
                 ratio = compile_times[csv_idx] / compile_times[0]
-                row.append(ratio)
+                row[f'compile time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
 
-    def get_max_delta(row: List) -> float:
-        delta_values = (abs(item) for item in row[-2 * (n_cvs_files - 1): -1 * (n_cvs_files - 1)])
-        return max(delta_values)
+
+    delta_header_names = get_delta_header_names(n_cvs_files)
+    def get_max_delta(row: Dict) -> float:
+        return max((abs(row[key]) for key in delta_header_names))
     return header, sort_table(table, get_max_delta)
 
 
@@ -345,9 +355,12 @@ def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
     header = ['name', 'total duration (ms)', 'count of executions']
     table = []
     for name, total in aggregate_unit_data(data, unit_type).items():
-        table.append([name, total.duration, total.count])
-    def get_duration(row: List) -> float:
-        return row[1]
+        row = {'name': name,
+               'total duration (ms)': total.duration,
+               'count of executions': total.count}
+        table.append(row)
+    def get_duration(row: Dict) -> float:
+        return row['total duration (ms)']
     return header, sort_table(table, get_duration)
 
 
@@ -395,6 +408,12 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
             column_names.append(f'count #{i + 1} - #1')
         return column_names
 
+    def get_delta_header_names(n_csv_files: int) -> List[str]:
+        column_names = []
+        for csv_idx in range(1, n_csv_files):
+            column_names.append(f'duration #{csv_idx + 1} - #1 (ms)')
+        return column_names
+
     n_csv_files = len(data)
 
     table = []
@@ -404,7 +423,7 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
                               for ts_name in aggregated_data_item)
 
     for name in all_transformations:
-        row = [name]
+        row = {'name' : name}
         durations = []
         counters = []
         for csv_idx in range(n_csv_files):
@@ -412,27 +431,28 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
             counters.append(get_count(aggregated_data[csv_idx], name))
 
         for csv_idx in range(n_csv_files):
-            row.append(durations[csv_idx])
+            row[f'duration #{csv_idx + 1} (ms)'] = durations[csv_idx]
         for csv_idx in range(1, n_csv_files):
-            row.append(durations[csv_idx] - durations[0])
+            delta = durations[csv_idx] - durations[0]
+            row[f'duration #{csv_idx + 1} - #1 (ms)'] = delta
         for csv_idx in range(1, n_csv_files):
             ratio = 0.0
             if durations[csv_idx] != 0.0:
                 ratio = durations[0]/durations[csv_idx]
-            row.append(ratio)
+            row[f'duration #{csv_idx + 1}/#1'] = ratio
 
         for csv_idx in range(n_csv_files):
-            row.append(counters[csv_idx])
+            row[f'count #{csv_idx + 1}'] = counters[csv_idx]
         for csv_idx in range(1, n_csv_files):
-            row.append(counters[csv_idx] - counters[0])
+            delta = counters[csv_idx] - counters[0]
+            row[f'count #{csv_idx + 1} - #1'] = delta
         table.append(row)
-
 
     header = create_header(n_csv_files)
 
-    def get_max_delta(row: List) -> float:
-        delta_values = (abs(item) for item in row[-4 * n_csv_files + 3: -3 * n_csv_files + 2])
-        return max(delta_values)
+    delta_header_names = get_delta_header_names(n_csv_files)
+    def get_max_delta(row: Dict) -> float:
+        return max((abs(row[key]) for key in delta_header_names))
     return header, sort_table(table, get_max_delta)
 
 
@@ -458,13 +478,6 @@ def get_all_models(data: List[Dict[ModelInfo, ModelData]]) -> Set[ModelInfo]:
     return set(model_info for csv_data in data for model_info in csv_data)
 
 
-def save_csv(header, table, path: str) -> None:
-    with open(path, 'w', newline='') as f_out:
-        csv_writer = csv.writer(f_out, delimiter=';')
-        csv_writer.writerow(header)
-        csv_writer.writerows(table)
-
-
 def make_model_file_name(model_info: ModelInfo, prefix: str) -> str:
     name = [prefix,
             model_info.framework,
@@ -475,18 +488,152 @@ def make_model_file_name(model_info: ModelInfo, prefix: str) -> str:
     return '_'.join(name) + '.csv'
 
 
-# TODO: make it abstract
-class DataProcessor:
+def make_model_console_description(model_info: ModelInfo) -> str:
+    name = [model_info.framework,
+            model_info.name,
+            model_info.precision]
+    if model_info.optional_attribute:
+        name.append(model_info.optional_attribute)
+    return ' '.join(name)
+
+
+class Output(ABC):
+    def __init__(self, header: List[str]):
+        self.header = header
+
+    @abstractmethod
+    def __enter__(self):
+        return self
+
+    @abstractmethod
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    @abstractmethod
+    def write_header(self):
+        pass
+
+    @abstractmethod
+    def write(self, row: List[Dict[str, str]]):
+        pass
+
+
+class CSVOutput(Output):
+    def __init__(self, path: str, header: List[str]):
+        super().__init__(header)
+        self.path = path
+        self.file = None
+
+    def write_header(self):
+        assert self.header is not None
+        csv_writer = csv.DictWriter(self.file, fieldnames=self.header, delimiter=';')
+        csv_writer.writeheader()
+
+    def write(self, rows: List[Dict[str, str]]):
+        assert self.file is not None
+        assert self.header is not None
+        csv_writer = csv.DictWriter(self.file, fieldnames=self.header, delimiter=';')
+        for row in rows:
+            csv_writer.writerow(row)
+
+    def __enter__(self):
+        self.file = open(self.path, 'w', newline='')
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.file:
+            self.file.close()
+
+
+class ConsoleTableOutput(Output):
+    def __init__(self, header: List[str], description: str):
+        super().__init__(header)
+        self.description = description
+        self.file = None
+
+    def write_header(self):
+        pass
+
+    def write(self, rows: List[Dict[str, str]]):
+        assert self.header is not None
+        print(self.description)
+        ordered_rows_str = [{key: str(row[key]) for key in self.header} for row in rows]
+        table = tabulate(ordered_rows_str, headers="keys")
+        print(table)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+class SingleOutputFactory(ABC):
     def __init__(self):
         pass
+
+    @abstractmethod
+    def create(self, header: List[str]):
+        pass
+
+
+class CSVSingleFileOutputFactory(SingleOutputFactory):
+    def __init__(self, path: str):
+        super().__init__()
+        self.path = path
+
+    def create(self, header: List[str]):
+        return CSVOutput(self.path, header)
+
+
+class ConsoleTableSingleFileOutputFactory(SingleOutputFactory):
+    def __init__(self, description: str):
+        super().__init__()
+        self.description = description
+
+    def create(self, header: List[str]):
+        return ConsoleTableOutput(header, self.description)
+
+
+class MultiOutputFactory(ABC):
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def create(self, header: List[str], model_info: ModelInfo):
+        pass
+
+
+class CSVMultiFileOutputFactory(MultiOutputFactory):
+    def __init__(self, prefix: str):
+        super().__init__()
+        self.prefix = prefix
+
+    def create(self, header: List[str], model_info: ModelInfo):
+        return CSVOutput(make_model_file_name(model_info, self.prefix), header)
+
+
+class ConsoleTableMultiOutputFactory(MultiOutputFactory):
+    def __init__(self, description: str):
+        super().__init__()
+        self.description = description
+
+    def create(self, header: List[str], model_info: ModelInfo):
+        return ConsoleTableOutput(header, make_model_console_description(model_info))
+
+
+class DataProcessor(ABC):
+    def __init__(self, output_factory):
+        self.output_factory = output_factory
+
+    @abstractmethod
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         pass
 
 
 class CompareCompileTime(DataProcessor):
-    def __init__(self, output: str):
-        super().__init__()
-        self.output = output
+    def __init__(self, output_factory: SingleOutputFactory):
+        super().__init__(output_factory)
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing compile time ...')
@@ -496,52 +643,55 @@ class CompareCompileTime(DataProcessor):
             print('no common models to compare compilation time ...')
             return
         header, table = compare_compile_time(csv_data_common_models)
-        save_csv(header, table, self.output)
+        with self.output_factory.create(header) as output:
+            output.write_header()
+            output.write(table)
 
 
 class GenerateLongestUnitsOverall(DataProcessor):
-    def __init__(self, output: str, unit_type: str):
-        super().__init__()
-        self.output = output
+    def __init__(self, output_factory: SingleOutputFactory, unit_type: str):
+        super().__init__(output_factory)
         self.unit_type = unit_type
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} overall data ...')
         header, table = get_longest_unit(csv_data, self.unit_type)
-        save_csv(header, table, self.output)
+        with self.output_factory.create(header) as output:
+            output.write_header()
+            output.write(table)
 
 
 class GenerateLongestUnitsPerModel(DataProcessor):
-    def __init__(self, output: str, unit_type: str):
-        super().__init__()
-        self.output = output
+    def __init__(self, output_factory: MultiOutputFactory, unit_type: str):
+        super().__init__(output_factory)
         self.unit_type = unit_type
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} per model data ...')
         for model_info in get_all_models(csv_data):
             header, table = get_longest_unit(filter_by_models(csv_data, [model_info]), self.unit_type)
-            file_name = make_model_file_name(model_info, self.output)
-            save_csv(header, table, file_name)
+            with self.output_factory.create(header, model_info) as output:
+                output.write_header()
+                output.write(table)
 
 
 class CompareSumUnitsOverall(DataProcessor):
-    def __init__(self, output: str, unit_type: str):
-        super().__init__()
-        self.output = output
+    def __init__(self, output_factory: SingleOutputFactory, unit_type: str):
+        super().__init__(output_factory)
         self.unit_type = unit_type
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} overall data ...')
         csv_data_common_models = filter_common_models(csv_data)
         header, table = compare_sum_units(csv_data_common_models, self.unit_type)
-        save_csv(header, table, self.output)
+        with self.output_factory.create(header) as output:
+            output.write_header()
+            output.write(table)
 
 
 class CompareSumUnitsPerModel(DataProcessor):
-    def __init__(self, output: str, unit_type: str):
-        super().__init__()
-        self.output = output
+    def __init__(self, output_factory: MultiOutputFactory, unit_type: str):
+        super().__init__(output_factory)
         self.unit_type = unit_type
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
@@ -549,8 +699,9 @@ class CompareSumUnitsPerModel(DataProcessor):
         csv_data_common_models = filter_common_models(csv_data)
         for model_info in get_all_models(csv_data_common_models):
             header, table = compare_sum_units(filter_by_models(csv_data, [model_info]), self.unit_type)
-            file_name = make_model_file_name(model_info, self.output)
-            save_csv(header, table, file_name)
+            with self.output_factory.create(header, model_info) as output:
+                output.write_header()
+                output.write(table)
 
 
 @dataclass
@@ -564,6 +715,7 @@ class Config:
     compare_managers_overall = None
     compare_transformations_per_model = None
     compare_managers_per_model = None
+    output_type = 'csv'
     model_name = None
     inputs: List[str] = field(default_factory=list)
 
@@ -713,6 +865,8 @@ If you want to get information only about models with specified model name,
 For example to dump only for models with name 'llama-3-8b',
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_managers_per_model --model_name llama-3-8b
 """)
+    args_parser.add_argument('--output_type', type=str, default='csv', help='csv or console')
+
     args = args_parser.parse_args()
 
     config = Config()
@@ -725,6 +879,10 @@ For example to dump only for models with name 'llama-3-8b',
     if any(not s for s in config.inputs):
         print('input file cannot be empty')
         sys.exit(1)
+
+    if args.output_type not in ('csv', 'console'):
+        raise Exception(f'unknown output type {args.output_type}')
+    config.output_type = args.output_type
 
     config.compare_compile_time = args.compare_compile_time
     config.transformations_overall = args.transformations_overall
@@ -740,26 +898,64 @@ For example to dump only for models with name 'llama-3-8b',
     return config
 
 
+def create_single_output_factory(output_type: str, path: str, description: str):
+    if output_type == 'csv':
+        return CSVSingleFileOutputFactory(path)
+    return ConsoleTableSingleFileOutputFactory(description)
+
+def create_multi_output_factory(output_type: str, prefix: str, description: str):
+    if output_type == 'csv':
+        return CSVMultiFileOutputFactory(prefix)
+    return ConsoleTableMultiOutputFactory(description)
+
+
 def main(config: Config) -> None:
     data_processors = []
     if config.compare_compile_time:
-        data_processors.append(CompareCompileTime(config.compare_compile_time))
+        output_factory = create_single_output_factory(config.output_type,
+                                                      config.compare_compile_time,
+                                                      'compilation time')
+        data_processors.append(CompareCompileTime(output_factory))
     if config.transformations_overall:
-        data_processors.append(GenerateLongestUnitsOverall(config.transformations_overall, unit_type='transformation'))
+        output_factory = create_single_output_factory(config.output_type,
+                                                      config.transformations_overall,
+                                                      'transformations overall')
+        data_processors.append(GenerateLongestUnitsOverall(output_factory, unit_type='transformation'))
     if config.manager_overall:
-        data_processors.append(GenerateLongestUnitsOverall(config.manager_overall, unit_type='manager'))
+        output_factory = create_single_output_factory(config.output_type,
+                                                      config.manager_overall,
+                                                      'managers overall')
+        data_processors.append(GenerateLongestUnitsOverall(output_factory, unit_type='manager'))
     if config.transformations_per_model:
-        data_processors.append(GenerateLongestUnitsPerModel(config.transformations_per_model, unit_type='transformation'))
+        output_factory = create_multi_output_factory(config.output_type,
+                                                     config.transformations_per_model,
+                                                     'transformations per model')
+        data_processors.append(GenerateLongestUnitsPerModel(output_factory, unit_type='transformation'))
     if config.managers_per_model:
-        data_processors.append(GenerateLongestUnitsPerModel(config.managers_per_model, unit_type='manager'))
+        output_factory = create_multi_output_factory(config.output_type,
+                                                     config.managers_per_model,
+                                                     'managers per model')
+        data_processors.append(GenerateLongestUnitsPerModel(output_factory, unit_type='manager'))
     if config.compare_transformations_overall:
-        data_processors.append(CompareSumUnitsOverall(config.compare_transformations_overall, unit_type='transformation'))
+        output_factory = create_single_output_factory(config.output_type,
+                                                      config.compare_transformations_overall,
+                                                      'compare transformations overall')
+        data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='transformation'))
     if config.compare_managers_overall:
-        data_processors.append(CompareSumUnitsOverall(config.compare_managers_overall, unit_type='manager'))
+        output_factory = create_single_output_factory(config.output_type,
+                                                      config.compare_managers_overall,
+                                                      'compare managers overall')
+        data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='manager'))
     if config.compare_transformations_per_model:
-        data_processors.append(CompareSumUnitsPerModel(config.compare_transformations_per_model, unit_type='transformation'))
+        output_factory = create_multi_output_factory(config.output_type,
+                                                     config.compare_transformations_per_model,
+                                                     'compare transformations per model')
+        data_processors.append(CompareSumUnitsPerModel(output_factory, unit_type='transformation'))
     if config.compare_managers_per_model:
-        data_processors.append(CompareSumUnitsPerModel(config.compare_managers_per_model, unit_type='manager'))
+        output_factory = create_multi_output_factory(config.output_type,
+                                                     config.compare_managers_per_model,
+                                                     'compare managers per model')
+        data_processors.append(CompareSumUnitsPerModel(output_factory, unit_type='manager'))
 
 
     if not data_processors:
