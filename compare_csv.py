@@ -270,7 +270,10 @@ def filter_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[Dict[Mo
 def sort_table(table: List[Dict], get_row_key_func) -> List[Dict]:
     sorting_table: List[Tuple[int, float]] = []
     for row_idx, row in enumerate(table):
-        sorting_table.append((row_idx, get_row_key_func(row)))
+        row_key = get_row_key_func(row)
+        if not isinstance(row_key, float):
+            row_key = 0.0
+        sorting_table.append((row_idx, row_key))
     sorted_table = sorted(sorting_table, key=lambda e: e[1], reverse=True)
     result_table = []
     for row in sorted_table:
@@ -305,7 +308,7 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
     n_cvs_files = len(data)
     header = create_header(n_cvs_files)
     table = []
-    models = [model_info for model_info in data[0]]
+    models = get_all_models(data)
     for model_info in models:
         row = {'framework': model_info.framework,
                'name': model_info.name,
@@ -313,17 +316,23 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
                'optional model attribute': model_info.optional_attribute}
         compile_times = []
         for csv_idx in range(n_cvs_files):
-            model_data = data[csv_idx][model_info]
-            compile_time = model_data.get_compile_time() / 1_000_000_000
+            compile_time = 'N/A'
+            if model_info in data[csv_idx]:
+                model_data = data[csv_idx][model_info]
+                compile_time = model_data.get_compile_time() / 1_000_000_000
             compile_times.append(compile_time)
         for csv_idx in range(n_cvs_files):
             row[f'compile time #{csv_idx + 1} (secs)'] = compile_times[csv_idx]
         for csv_idx in range(1, n_cvs_files):
-            delta = compile_times[csv_idx] - compile_times[0]
+            delta = 'N/A'
+            if isinstance(compile_times[0], float) and isinstance(compile_times[csv_idx], float):
+                delta = compile_times[csv_idx] - compile_times[0]
             row[f'compile time #{csv_idx + 1} - #1 (secs)'] = delta
         for csv_idx in range(1, n_cvs_files):
             ratio = 'N/A'
-            if compile_times[0] != 0.0:
+            if (isinstance(compile_times[0], float)
+                    and isinstance(compile_times[csv_idx], float)
+                    and compile_times[0] != 0.0):
                 ratio = compile_times[csv_idx] / compile_times[0]
             row[f'compile time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
@@ -331,7 +340,8 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
 
     delta_header_names = get_delta_header_names(n_cvs_files)
     def get_max_delta(row: Dict) -> float:
-        return max((abs(row[key]) for key in delta_header_names))
+        return max((abs(row[key]) for key in delta_header_names if isinstance(row[key], float)),
+                   default=None)
     return header, sort_table(table, get_max_delta)
 
 
@@ -649,11 +659,10 @@ class CompareCompileTime(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing compile time ...')
         # CSV files can store different models info
-        csv_data_common_models = filter_common_models(csv_data)
-        if not csv_data_common_models:
+        if not csv_data:
             print('no common models to compare compilation time ...')
             return
-        header, table = compare_compile_time(csv_data_common_models)
+        header, table = compare_compile_time(csv_data)
         with self.output_factory.create(header) as output:
             output.write_header()
             output.write(table)
