@@ -319,11 +319,13 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
         for csv_idx in range(n_cvs_files):
             row[f'compile time #{csv_idx + 1} (secs)'] = compile_times[csv_idx]
         for csv_idx in range(1, n_cvs_files):
-                delta = compile_times[csv_idx] - compile_times[0]
-                row[f'compile time #{csv_idx + 1} - #1 (secs)'] = delta
+            delta = compile_times[csv_idx] - compile_times[0]
+            row[f'compile time #{csv_idx + 1} - #1 (secs)'] = delta
         for csv_idx in range(1, n_cvs_files):
+            ratio = 'N/A'
+            if compile_times[0] != 0.0:
                 ratio = compile_times[csv_idx] / compile_times[0]
-                row[f'compile time #{csv_idx + 1}/#1'] = ratio
+            row[f'compile time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
 
 
@@ -436,11 +438,10 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
             delta = durations[csv_idx] - durations[0]
             row[f'duration #{csv_idx + 1} - #1 (ms)'] = delta
         for csv_idx in range(1, n_csv_files):
-            ratio = 0.0
-            if durations[csv_idx] != 0.0:
-                ratio = durations[0]/durations[csv_idx]
+            ratio = 'N/A'
+            if durations[0] != 0.0:
+                ratio = durations[csv_idx]/durations[0]
             row[f'duration #{csv_idx + 1}/#1'] = ratio
-
         for csv_idx in range(n_csv_files):
             row[f'count #{csv_idx + 1}'] = counters[csv_idx]
         for csv_idx in range(1, n_csv_files):
