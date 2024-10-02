@@ -821,6 +821,7 @@ duration #2/#1 - ratio duration#2 / duration #1
 count #1 - count of all execution of this transformation in first dev_trigger job (/dir1/file1.csv) for all models
 count #2 - count of all execution of this transformation in second dev_trigger job (/dir2/file2.csv) for all models
 count #2 - #1 (secs) - delta between count#2 and count#1
+It takes into account only those models, that exists in all input CSV files.
 You can specify output names prefix, for example
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_transformations_overall /dir3/output3
 ''')
@@ -839,6 +840,7 @@ duration #2/#1 - ratio duration#2 / duration #1
 count #1 - count of all execution of this manager in first dev_trigger job (/dir1/file1.csv) for all models
 count #2 - count of all execution of this manager in second dev_trigger job (/dir2/file2.csv) for all models
 count #2 - #1 (secs) - delta between count#2 and count#1
+It takes into account only those models, that exists in all input CSV files.
 You can specify output names prefix, for example
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_managers_overall /dir3/output3
 ''')
