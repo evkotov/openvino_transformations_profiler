@@ -17,7 +17,8 @@ def get_csv_header(path: str) -> List[str]:
         return next(csv_reader)
 
 
-CSVColumnNames = ('model_path',
+CSVColumnNames = ('device',
+                  'model_path',
                   'model_name',
                   'model_framework',
                   'model_precision',
