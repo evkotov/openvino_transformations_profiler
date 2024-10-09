@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import os
 import sys
 from tabulate import tabulate
-from typing import List, Dict, Tuple, Generator, Set
+from typing import List, Dict, Tuple, Iterator, Set, Optional
 
 import numpy as np
 
@@ -47,11 +47,14 @@ class Unit:
         self.transformation_name = csv_item.transformation_name
         self.manager_name = csv_item.manager_name
         self.__durations: List[float] = [float(csv_item.duration)]
-        self.__duration_median: float = None
-        self.__variations: List[float] = None
+        self.__duration_median: Optional[float] = None
+        self.__variations: Optional[List[float]] = None
 
     def get_n_durations(self) -> int:
         return len(self.__durations)
+
+    def get_durations(self) -> List[float]:
+        return self.__durations
 
     def get_duration_median(self) -> float:
         if not self.__durations:
@@ -92,8 +95,8 @@ class Unit:
 def check_header(column_names: List[str]) -> None:
     column_names = set(column_names)
     for name in CSVColumnNames:
-        if name == 'optional_model_attribute':
-            # no such column in old CSV files
+        if name == 'optional_model_attribute' or name == 'device':
+            # no such columns in old CSV files
             continue
         assert name in column_names
 
@@ -104,17 +107,20 @@ def csv_has_optional_model_attr(path: str) -> bool:
         return 'optional_model_attribute' in column_names
 
 
-def read_csv(path: str) -> Generator:
+def read_csv(path: str) -> Iterator[CSVItem]:
     with open(path, 'r') as f_in:
         column_names = get_csv_header(path)
         check_header(column_names)
         has_optional_model_attr = 'optional_model_attribute' in column_names
+        has_device = 'device' in column_names
         csv_reader = csv.reader(f_in, delimiter=';')
         for row in csv_reader:
             if row[-1] == 'duration':
                 continue
             if not has_optional_model_attr:
                 row.insert(4, '')
+            if not has_device:
+                row.insert(0, 'N/A')
             yield CSVItem(*row)
 
 
@@ -141,17 +147,21 @@ class ModelData:
                 self.__item_last_idx += 1
             self.items[self.__item_last_idx].add(csv_item)
 
-    def get_items(self, filter_item_func) -> Generator[Unit, None, None]:
+    def get_items(self, filter_item_func) -> Iterator[Unit]:
         for item in self.items:
             if filter_item_func(item):
                 yield item
 
-    def get_items_by_type(self, type_name: str) -> Generator[Unit, None, None]:
+    def get_items_by_type(self, type_name: str) -> Iterator[Unit]:
         return self.get_items(lambda item: item.type == type_name)
 
     def get_compile_time(self) -> float:
         item = next(self.get_items_by_type('compile_time'))
         return item.get_duration_median()
+
+    def get_compile_durations(self) -> List[float]:
+        item = next(self.get_items_by_type('compile_time'))
+        return item.get_durations()
 
     def get_duration(self, i: int) -> float:
         return self.items[i].get_duration_median()
