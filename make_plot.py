@@ -1,15 +1,16 @@
 import sys
+from idlelib.history import History
 from typing import List, Iterator
 
-from compare_csv import ModelInfo, get_csv_data
-from stat_utils import get_iter_time_values, compile_time_by_iterations
-from plot_utils import Plot
+from compare_csv import ModelInfo, get_csv_data, get_device
+from stat_utils import get_iter_time_values, compile_time_by_iterations, get_stddev_unit_durations_all_csv
+from plot_utils import Plot, Hist
 
 import numpy as np
 
 
-def gen_compile_time_by_iterations(model_info: ModelInfo, model_data_items: Iterator[List[float]]):
-    title = f'Compile time {model_info.framework} {model_info.name} {model_info.precision}'
+def gen_compile_time_by_iterations(device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]]):
+    title = f'Compile time {device} {model_info.framework} {model_info.name} {model_info.precision}'
     if model_info.optional_attribute:
         title += f' {model_info.optional_attribute}'
     x_label = 'Job run time (seconds)'
@@ -24,34 +25,68 @@ def gen_compile_time_by_iterations(model_info: ModelInfo, model_data_items: Iter
         assert len(compile_time_values) == len(iterations)
         plot.add(iterations, compile_time_values)
 
+    if not all_compile_time_values:
+        print(f'no compile times for {model_info}')
+        return
+
     # Calculate the median value of y_values
     median_value = float(np.median(all_compile_time_values))
-    plot.append_x_line(median_value, f'Median: {"%.2f" % median_value} secs')
+    plot.append_x_line(median_value, f'Median: {"%.2f" % median_value} seconds', 'red', '--')
 
-    # Calculate 10% deviation from the median
-    deviation = 0.01 * median_value
-    lower_bound = median_value - deviation
-    upper_bound = median_value + deviation
-    plot.set_stripe(lower_bound, upper_bound, label='1% Deviation from the median')
+    # maximum deviation from median in %
+    max_deviation_abs = max((item for item in all_compile_time_values), key=lambda e: abs(e - median_value))
+    max_deviation = abs(median_value - max_deviation_abs) * 100.0 / median_value
+    plot.append_x_line(max_deviation_abs, f'{"%.2f" % abs(max_deviation)}% max deviation from the median',
+                           'blue', ':')
 
-    # maximum variation from median in %
-    if all_compile_time_values:
-        max_variation_abs = max((item for item in all_compile_time_values), key=lambda e: abs(e - median_value))
-        max_variation = abs(median_value - max_variation_abs) * 100.0 / median_value
-        plot.append_x_line(max_variation_abs, f'{"%.2f" % abs(max_variation)}% max variation from median')
+    if max_deviation > 1.0:
+        # Calculate 10% deviation from the median
+        deviation = 0.01 * median_value
+        lower_bound = median_value - deviation
+        upper_bound = median_value + deviation
+        plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
 
-    path = f'compile_time_{model_info.framework}_{model_info.name}_{model_info.precision}'
+    path = f'compile_time_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}'
     if model_info.optional_attribute:
         path += f'_{model_info.optional_attribute}'
     path += '.png'
     plot.plot(path)
 
 
+def gen_hist_values(device: str, model_info: ModelInfo, values: List[float]):
+    title = f'Ratio std dev to median {device} {model_info.framework} {model_info.name} {model_info.precision}'
+    if model_info.optional_attribute:
+        title += f' {model_info.optional_attribute}'
+    x_label = 'Ratio'
+    y_label = 'Number of values'
+    hist = Hist(title, x_label, y_label)
+    hist.set_values(values)
+    hist.set_bins(160)
+    path = f'hist_stddev_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}'
+    if model_info.optional_attribute:
+        path += f'_{model_info.optional_attribute}'
+    path += '.png'
+    hist.plot(path)
+
+
 def gen_compile_time_by_iterations_from_input(inputs: List[str]):
     csv_data = get_csv_data(inputs)
-    for model_info, model_data_items in compile_time_by_iterations(csv_data):
-        gen_compile_time_by_iterations(model_info, model_data_items)
+    if not csv_data:
+        return
+    device = get_device(csv_data)
+    for model_info, durations in compile_time_by_iterations(csv_data):
+        gen_compile_time_by_iterations(device, model_info, durations)
+
+
+def gen_stddev_units_from_input(inputs: List[str], unit_type: str, min_median: float):
+    csv_data = get_csv_data(inputs)
+    if not csv_data:
+        return
+    device = get_device(csv_data)
+    for model_info, values in get_stddev_unit_durations_all_csv(csv_data, unit_type, min_median):
+        gen_hist_values(device, model_info, values)
 
 
 if __name__ == '__main__':
-    gen_compile_time_by_iterations_from_input(sys.argv[1:])
+    #gen_compile_time_by_iterations_from_input(sys.argv[1:])
+    gen_stddev_units_from_input(sys.argv[1:], 'transformation', 1.0)

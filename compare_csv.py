@@ -36,6 +36,7 @@ CSVItem = namedtuple('CSVItem', CSVColumnNames)
 class Unit:
     def __init__(self, csv_item: CSVItem):
         self.name = None
+        self.device = csv_item.device
         if csv_item.type == 'transformation':
             self.name = csv_item.transformation_name
         elif csv_item.type == 'manager':
@@ -69,6 +70,8 @@ class Unit:
             self.__variations = [abs(item - median) for item in self.__durations]
         return self.__variations
 
+    def get_duration_stddev(self) -> float:
+        return float(np.std(self.__durations))
 
     def get_variations_as_ratio(self) -> List[float]:
         if self.__variations is None:
@@ -121,7 +124,12 @@ def read_csv(path: str) -> Iterator[CSVItem]:
                 row.insert(4, '')
             if not has_device:
                 row.insert(0, 'N/A')
-            yield CSVItem(*row)
+            try:
+                csv_item = CSVItem(*row)
+            except:
+                print(f'exception in row {row}')
+                raise
+            yield csv_item
 
 
 UnitInfo = namedtuple('UnitInfo', ['type',
@@ -147,20 +155,32 @@ class ModelData:
                 self.__item_last_idx += 1
             self.items[self.__item_last_idx].add(csv_item)
 
+    def get_device(self):
+        # assume that all data were collected on one device
+        return self.items[0].device
+
     def get_items(self, filter_item_func) -> Iterator[Unit]:
         for item in self.items:
             if filter_item_func(item):
                 yield item
 
-    def get_items_by_type(self, type_name: str) -> Iterator[Unit]:
+    def get_items_with_type(self, type_name: str) -> Iterator[Unit]:
         return self.get_items(lambda item: item.type == type_name)
 
+    def collect_items_by_type(self, type_name: str) -> Dict[str, List[Unit]]:
+        result: Dict[str, List[Unit]] = {}
+        for item in self.get_items_with_type(type_name):
+            if item.name not in result:
+                result[item.name] = []
+            result[item.name].append(item)
+        return result
+
     def get_compile_time(self) -> float:
-        item = next(self.get_items_by_type('compile_time'))
+        item = next(self.get_items_with_type('compile_time'))
         return item.get_duration_median()
 
     def get_compile_durations(self) -> List[float]:
-        item = next(self.get_items_by_type('compile_time'))
+        item = next(self.get_items_with_type('compile_time'))
         return item.get_durations()
 
     def get_duration(self, i: int) -> float:
@@ -181,11 +201,13 @@ class ModelData:
     def check(self) -> None:
         if len(self.items) == 0:
             return
+        assert all(e.device == self.items[0].device for e in self.items), \
+            f'different devices found in input data'
         n_iteration_items = [item.get_n_durations() for item in self.items]
         assert all(e == n_iteration_items[0] for e in n_iteration_items), \
             f'different number of items in different iterations: {n_iteration_items}'
         # check if there is compile time in each iteration
-        n_compile_time_items = sum(1 for _ in self.get_items_by_type('compile_time'))
+        n_compile_time_items = sum(1 for _ in self.get_items_with_type('compile_time'))
         assert n_compile_time_items == 1, \
             f'iteration data must consists exact 1 compile_time item but there are: {n_compile_time_items}'
 
@@ -292,6 +314,13 @@ def sort_table(table: List[Dict], get_row_key_func) -> List[Dict]:
     return result_table
 
 
+def full_join_by_model_info(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[Optional[ModelData]]]]:
+    keys = set(info for data_item in data for info in data_item)
+    for model_info in keys:
+        items = (item[model_info] if model_info in item else None for item in data)
+        yield model_info, items
+
+
 def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
     if len(data) == 0:
         return [], []
@@ -319,35 +348,27 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
     n_cvs_files = len(data)
     header = create_header(n_cvs_files)
     table = []
-    models = get_all_models(data)
-    for model_info in models:
+    for model_info, model_data_items in full_join_by_model_info(data):
         row = {'framework': model_info.framework,
                'name': model_info.name,
                'precision': model_info.precision,
                'optional model attribute': model_info.optional_attribute}
-        compile_times = []
+        compile_times = [model_data.get_compile_time() / 1_000_000_000 if model_data is not None else None
+                         for model_data in model_data_items]
         for csv_idx in range(n_cvs_files):
-            compile_time = 'N/A'
-            if model_info in data[csv_idx]:
-                model_data = data[csv_idx][model_info]
-                compile_time = model_data.get_compile_time() / 1_000_000_000
-            compile_times.append(compile_time)
-        for csv_idx in range(n_cvs_files):
-            row[f'compile time #{csv_idx + 1} (secs)'] = compile_times[csv_idx]
+            value = compile_times[csv_idx] if compile_times[csv_idx] is not None else 'N/A'
+            row[f'compile time #{csv_idx + 1} (secs)'] = value
         for csv_idx in range(1, n_cvs_files):
             delta = 'N/A'
-            if isinstance(compile_times[0], float) and isinstance(compile_times[csv_idx], float):
+            if compile_times[0] is not None and compile_times[csv_idx] is not None:
                 delta = compile_times[csv_idx] - compile_times[0]
             row[f'compile time #{csv_idx + 1} - #1 (secs)'] = delta
         for csv_idx in range(1, n_cvs_files):
             ratio = 'N/A'
-            if (isinstance(compile_times[0], float)
-                    and isinstance(compile_times[csv_idx], float)
-                    and compile_times[0] != 0.0):
+            if compile_times[0] is not None and compile_times[csv_idx] is not None and compile_times[0] != 0.0:
                 ratio = compile_times[csv_idx] / compile_times[0]
             row[f'compile time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
-
 
     delta_header_names = get_delta_header_names(n_cvs_files)
     def get_max_delta(row: Dict) -> float:
@@ -356,30 +377,56 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
     return header, sort_table(table, get_max_delta)
 
 
+def get_items_by_type(data: Dict[ModelInfo, ModelData],
+                      unit_type: str) -> Dict[str, List[Unit]]:
+    result: Dict[str, List[Unit]]
+    for model_info, model_data in data:
+        for name, units in model_data.collect_items_by_type(unit_type):
+            if name not in result:
+                result[name] = []
+            result[name].extend(units)
+    return result
+
+
+class Total:
+    def __init__(self):
+        self.duration: float = 0.0
+        self.count: int = 0
+
+    def append(self, total):
+        self.duration += total.duration
+        self.count += total.count
+
+
+def get_sum_duration(data: Dict[ModelInfo, ModelData],
+                     unit_type: str) -> Dict[str, Total]:
+    result: Dict[str, Total] = {} # ts name: Total
+    for name, units in get_items_by_type(data, unit_type).items():
+        total = Total()
+        total.duration = sum((unit.get_duration_median() for unit in units))
+        total.count = len(units)
+        result[name] = total
+    return result
+
+
+def get_sum_duration_all_csv(data: List[Dict[ModelInfo, ModelData]],
+                             unit_type: str):
+    result: Dict[str, Total] = {} # ts name: Total
+    for csv_item in data:
+        for name, total in get_sum_duration(csv_item, unit_type).items():
+            if name not in result:
+                result[name] = Total()
+            result[name].append(total)
+    return result
+
+
 def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
                      unit_type: str):
-    @dataclass
-    class Total:
-        duration: float
-        count: int
-
-    def aggregate_unit_data(data: List[Dict[ModelInfo, ModelData]],
-                            unit_type: str) -> Dict[str, Total]:
-        result: Dict[str, Total] = {} # ts name: Total
-        for csv_item in data:
-            for model_info, model_data in csv_item.items():
-                for item in model_data.get_items_by_type(unit_type):
-                    if item.name not in result:
-                        result[item.name] = Total(0.0, 0)
-                    result[item.name].duration += item.get_duration_median() / 1_000_000
-                    result[item.name].count += 1
-        return result
-
     header = ['name', 'total duration (ms)', 'count of executions']
     table = []
-    for name, total in aggregate_unit_data(data, unit_type).items():
+    for name, total in get_sum_duration_all_csv(data, unit_type).items():
         row = {'name': name,
-               'total duration (ms)': total.duration,
+               'total duration (ms)': total.duration / 1_000_000,
                'count of executions': total.count}
         table.append(row)
     def get_duration(row: Dict) -> float:
@@ -389,22 +436,6 @@ def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
 
 def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
                       unit_type: str):
-    @dataclass
-    class Total:
-        duration: float
-        count: int
-
-    def aggregate_unit_data(data: Dict[ModelInfo, ModelData],
-                            unit_type: str) -> Dict[str, Total]:
-        result: Dict[str, Total] = {} # ts name: Total
-        for model_info, model_data in data.items():
-            for item in model_data.get_items_by_type(unit_type):
-                if item.name not in result:
-                    result[item.name] = Total(0.0, 0)
-                result[item.name].duration += item.get_duration_median() / 1_000_000
-                result[item.name].count += 1
-        return result
-
     def get_duration(aggregated_data_item: Dict[str, Total], name: str) -> float:
         duration = 0.0
         if name in aggregated_data_item:
@@ -441,7 +472,7 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
 
     table = []
 
-    aggregated_data = [aggregate_unit_data(csv_data, unit_type) for csv_data in data]
+    aggregated_data = [get_sum_duration(csv_data, unit_type) for csv_data in data]
     all_transformations = set(ts_name for aggregated_data_item in aggregated_data
                               for ts_name in aggregated_data_item)
 
@@ -494,6 +525,13 @@ def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
         check_csv_data(current_csv_data)
         csv_data.append(current_csv_data)
     return csv_data
+
+
+def get_device(data: List[Dict[ModelInfo, ModelData]]) -> str:
+    if not data:
+        return ''
+    key = next(iter(data[0]))
+    return data[0][key].get_device()
 
 
 def get_all_models(data: List[Dict[ModelInfo, ModelData]]) -> Set[ModelInfo]:
