@@ -239,10 +239,7 @@ def get_optional_model_attr(path: str) -> str:
     return attr
 
 
-def read_csv_data(path: str) -> Dict[ModelInfo, ModelData]:
-    print(f'reading {path} ...')
-    csv_rows = read_csv(path)
-    has_optional_model_attr = csv_has_optional_model_attr(path)
+def read_csv_data(csv_rows: Iterator[CSVItem], has_optional_model_attr: bool) -> Dict[ModelInfo, ModelData]:
     data: Dict[ModelInfo, ModelData] = {}
     for item in csv_rows:
         if has_optional_model_attr:
@@ -256,6 +253,7 @@ def read_csv_data(path: str) -> Dict[ModelInfo, ModelData]:
         if model_info not in data:
             data[model_info] = ModelData()
         data[model_info].append(item)
+    check_csv_data(data)
     return data
 
 
@@ -521,8 +519,10 @@ def check_csv_data(data: Dict[ModelInfo, ModelData]) -> None:
 def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
     csv_data = []
     for csv_path in csv_paths:
-        current_csv_data = read_csv_data(csv_path)
-        check_csv_data(current_csv_data)
+        print(f'reading {csv_path} ...')
+        has_optional_model_attr = csv_has_optional_model_attr(csv_path)
+        csv_rows = read_csv(csv_path)
+        current_csv_data = read_csv_data(csv_rows, has_optional_model_attr)
         csv_data.append(current_csv_data)
     return csv_data
 
