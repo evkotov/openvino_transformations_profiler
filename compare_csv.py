@@ -34,6 +34,9 @@ CSVItem = namedtuple('CSVItem', CSVColumnNames)
 
 
 class Unit:
+    USE_ONLY_0_ITER_GPU = False
+    USE_ONLY_0_ITER_CPU = False
+
     def __init__(self, csv_item: CSVItem):
         self.name = None
         self.device = csv_item.device
@@ -49,7 +52,7 @@ class Unit:
         self.manager_name = csv_item.manager_name
         self.__durations: List[float] = [float(csv_item.duration)]
         self.__duration_median: Optional[float] = None
-        self.__variations: Optional[List[float]] = None
+        self.__deviations: Optional[List[float]] = None
 
     def get_n_durations(self) -> int:
         return len(self.__durations)
@@ -61,28 +64,32 @@ class Unit:
         if not self.__durations:
             return 0.0
         if self.__duration_median is None:
-            self.__duration_median = float(np.median(self.__durations))
+            if (Unit.USE_ONLY_0_ITER_GPU and self.device == 'GPU' or
+                    Unit.USE_ONLY_0_ITER_CPU and self.device == 'CPU'):
+                self.__duration_median = self.__durations[0]
+            else:
+                self.__duration_median = float(np.median(self.__durations))
         return self.__duration_median
 
-    def get_variations(self) -> List[float]:
-        if self.__variations is None:
+    def get_deviations(self) -> List[float]:
+        if self.__deviations is None:
             median = self.get_duration_median()
-            self.__variations = [abs(item - median) for item in self.__durations]
-        return self.__variations
+            self.__deviations = [abs(item - median) for item in self.__durations]
+        return self.__deviations
 
     def get_duration_stddev(self) -> float:
         return float(np.std(self.__durations))
 
     def get_variations_as_ratio(self) -> List[float]:
-        if self.__variations is None:
+        if self.__deviations is None:
             median = self.get_duration_median()
-            self.__variations = []
+            self.__deviations = []
             for item in self.__durations:
                 if median != 0.0:
-                    self.__variations.append(abs(item - median) / median)
+                    self.__deviations.append(abs(item - median) / median)
                 else:
-                    self.__variations.append(0.0)
-        return self.__variations
+                    self.__deviations.append(0.0)
+        return self.__deviations
 
     def add(self, csv_item: CSVItem) -> None:
         assert self.model_path == csv_item.model_path
@@ -197,6 +204,11 @@ class ModelData:
     def get_item_info(self, i: int) -> UnitInfo:
         item = self.items[i]
         return UnitInfo(item.type, item.transformation_name, item.manager_name)
+
+    def get_n_iterations(self):
+        if not self.items:
+            return 0
+        return self.items[0].get_n_durations()
 
     def check(self) -> None:
         if len(self.items) == 0:
@@ -377,9 +389,9 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
 
 def get_items_by_type(data: Dict[ModelInfo, ModelData],
                       unit_type: str) -> Dict[str, List[Unit]]:
-    result: Dict[str, List[Unit]]
-    for model_info, model_data in data:
-        for name, units in model_data.collect_items_by_type(unit_type):
+    result: Dict[str, List[Unit]] = {}
+    for model_info, model_data in data.items():
+        for name, units in model_data.collect_items_by_type(unit_type).items():
             if name not in result:
                 result[name] = []
             result[name].extend(units)
@@ -437,7 +449,7 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
     def get_duration(aggregated_data_item: Dict[str, Total], name: str) -> float:
         duration = 0.0
         if name in aggregated_data_item:
-            duration = aggregated_data_item[name].duration
+            duration = aggregated_data_item[name].duration / 1_000_000
         return duration
 
     def get_count(aggregated_data_item: Dict[str, Total], name: str) -> int:
@@ -1059,4 +1071,6 @@ def main(config: Config) -> None:
 
 
 if __name__ == '__main__':
+    Unit.USE_ONLY_0_ITER_GPU = True
+    Unit.USE_ONLY_0_ITER_CPU = False
     main(parse_args())

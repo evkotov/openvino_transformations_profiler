@@ -115,3 +115,30 @@ class Hist:
         plt.savefig(path)
         # Close the plot so it doesn't show up
         plt.close()
+
+
+class ScatterPlot:
+    def __init__(self, title: str, x_label: str, y_label: str):
+        self.__title = title
+        self.__x_label = x_label
+        self.__y_label = y_label
+        self.__x_values: List[float] = []
+        self.__y_values: List[float] = []
+        self.__plot_size = (10, 8)
+
+    def set_values(self, x_values: List[float], y_values: List[float]):
+        self.__x_values = x_values
+        self.__y_values = y_values
+
+    def plot(self, path: str):
+        plt.figure(figsize=self.__plot_size)
+        plt.scatter(self.__x_values, self.__y_values)
+
+        # Add titles and labels
+        plt.title(self.__title)
+        plt.xlabel(self.__x_label)
+        plt.ylabel(self.__y_label)
+
+        plt.savefig(path)
+        # Close the plot so it doesn't show up
+        plt.close()

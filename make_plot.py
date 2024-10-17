@@ -1,10 +1,12 @@
+import csv
 import sys
-from typing import List, Iterator
+from typing import List, Iterator, Dict
 
-from compare_csv import ModelInfo, get_csv_data, get_device
+from compare_csv import ModelInfo, get_csv_data, get_device, sort_table
 from stat_utils import get_iter_time_values, compile_time_by_iterations, get_stddev_unit_durations_all_csv
-from stat_utils import get_sum_units_durations_by_iteration
-from plot_utils import Plot, Hist
+from stat_utils import get_sum_units_durations_by_iteration, get_model_unit_sum_by_iterations_all_csv
+from stat_utils import get_model_units_deviations_by_iter_all_csv
+from plot_utils import Plot, Hist, ScatterPlot
 
 import numpy as np
 
@@ -97,7 +99,104 @@ def gen_stddev_units_from_input(inputs: List[str], unit_type: str, min_median: f
         gen_hist_values(device, model_info, values)
 
 
+def gen_csv_sum_iterations(device: str, model_info, unit_sums: Dict[str, List[float]], prefix: str):
+    def create_header(n_iterations: int):
+        column_names = ['name', 'median']
+        for i in range(n_iterations):
+            column_names.append(f'iteration #{i + 1} (ms)')
+        for i in range(n_iterations):
+            column_names.append(f'iteration #{i + 1} - median (ms)')
+        return column_names
+
+    def get_delta_header_names(n_iterations: int) -> List[str]:
+        column_names = []
+        for n_iteration in range(n_iterations):
+            column_names.append(f'iteration #{n_iteration + 1} - median (ms)')
+        return column_names
+
+    def get_n_iterations(unit_sums: Dict[str, List[float]]) -> int:
+        first_key, first_value = next(iter(unit_sums.items()))
+        return len(first_value)
+
+    n_iterations = get_n_iterations(unit_sums)
+
+    table = []
+    for name in unit_sums.keys():
+        durations = [e / 1_000_000 for e in unit_sums[name]]
+        median = np.median(durations)
+        row = {'name' : name, 'median' : float(median)}
+        for n_iteration in range(n_iterations):
+            row[f'iteration #{n_iteration + 1} (ms)'] = float(durations[n_iteration])
+            delta = durations[n_iteration] - median
+            row[f'iteration #{n_iteration + 1} - median (ms)'] = float(delta)
+        table.append(row)
+
+    header = create_header(n_iterations)
+    delta_header_names = get_delta_header_names(n_iterations)
+
+    def get_max_delta(row: Dict) -> float:
+        return max((abs(row[key]) for key in delta_header_names))
+    sorted_table = sort_table(table, get_max_delta)
+
+    path = f'{prefix}_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}'
+    if model_info.optional_attribute:
+        path += f'_{model_info.optional_attribute}'
+    path += '.csv'
+
+    with open(path, mode="w", newline="") as f_out:
+        csv_writer = csv.DictWriter(f_out, fieldnames=header, delimiter=';')
+        csv_writer.writeheader()
+        for row in sorted_table:
+            csv_writer.writerow(row)
+
+def gen_csv_transformations_sum_time_by_iterations_from_input(inputs: List[str], unit_type: str):
+    csv_data = get_csv_data(inputs)
+    if not csv_data:
+        return
+    device = get_device(csv_data)
+    for model_info, unit_sums in get_model_unit_sum_by_iterations_all_csv(csv_data, unit_type):
+        i = 0
+        for unit_sums_dict in unit_sums:
+            gen_csv_sum_iterations(device, model_info, unit_sums_dict, f'sum_ts_iterations_{i}')
+            i += 1
+
+
+def gen_deviation_scatter_units_values(device: str,
+                                       model_info: ModelInfo,
+                                       n_iter: int,
+                                       x_values: List[float],
+                                       y_values: List[float]):
+    title = f'Deviation scatter iteration #{n_iter} {device} {model_info.framework} {model_info.name} {model_info.precision}'
+    if model_info.optional_attribute:
+        title += f' {model_info.optional_attribute}'
+    x_label = 'Median (ms)'
+    y_label = f'Duration on {n_iter} iteration  - Median (ms)'
+    plot = ScatterPlot(title, x_label, y_label)
+    plot.set_values(x_values, y_values)
+    path = f'scatter_deviation_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}_{n_iter}'
+    if model_info.optional_attribute:
+        path += f'_{model_info.optional_attribute}'
+    path += '.png'
+    plot.plot(path)
+
+
+def gen_deviation_units_from_input(inputs: List[str], unit_type: str, min_median: float):
+    csv_data = get_csv_data(inputs)
+    if not csv_data:
+        return
+    device = get_device(csv_data)
+    min_median_ms = min_median * 1_000
+    for model_info, deviations in get_model_units_deviations_by_iter_all_csv(csv_data, unit_type):
+        for n_iter in range(len(deviations)):
+            iter_deviations = [e for e in deviations[n_iter] if e.median >= min_median_ms]
+            x_values = [e.median / 1_000_000 for e in iter_deviations]
+            y_values = [e.deviation / 1_000_000 for e in iter_deviations]
+            gen_deviation_scatter_units_values(device, model_info, n_iter, x_values, y_values)
+
+
 if __name__ == '__main__':
-    gen_compile_time_by_iterations_from_input(sys.argv[1:])
+    #gen_compile_time_by_iterations_from_input(sys.argv[1:])
     #gen_stddev_units_from_input(sys.argv[1:], 'transformation', 1.0)
     #gen_transformations_sum_time_by_iterations_from_input(sys.argv[1:], 'transformation')
+    #gen_csv_transformations_sum_time_by_iterations_from_input(sys.argv[1:], 'transformation')
+    gen_deviation_units_from_input(sys.argv[1:], 'transformation', 1.0)
