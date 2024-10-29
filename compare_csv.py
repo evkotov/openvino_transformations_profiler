@@ -35,7 +35,7 @@ CSVItem = namedtuple('CSVItem', CSVColumnNames)
 
 class Unit:
     USE_ONLY_0_ITER_GPU = False
-    USE_ONLY_0_ITER_CPU = False
+    USE_ONLY_0_ITER = False
 
     def __init__(self, csv_item: CSVItem):
         self.name = None
@@ -65,7 +65,7 @@ class Unit:
             return 0.0
         if self.__duration_median is None:
             if (Unit.USE_ONLY_0_ITER_GPU and self.device == 'GPU' or
-                    Unit.USE_ONLY_0_ITER_CPU and self.device == 'CPU'):
+                    Unit.USE_ONLY_0_ITER):
                 self.__duration_median = self.__durations[0]
             else:
                 self.__duration_median = float(np.median(self.__durations))
@@ -148,10 +148,14 @@ class ModelData:
     def __init__(self):
         self.items: List[Unit] = []
         self.__item_last_idx = None
+        self.__last_iter_num: int = 0
 
     def append(self, csv_item: CSVItem) -> None:
         n_iteration = int(csv_item.iteration)
         assert n_iteration > 0
+        assert n_iteration >= self.__last_iter_num, \
+            'consistency error: the iteration numbers must follow in ascending order'
+        self.__last_iter_num = n_iteration
         if n_iteration == 1:
             self.items.append(Unit(csv_item))
         else:
@@ -253,6 +257,7 @@ def get_optional_model_attr(path: str) -> str:
 
 def read_csv_data(csv_rows: Iterator[CSVItem], has_optional_model_attr: bool) -> Dict[ModelInfo, ModelData]:
     data: Dict[ModelInfo, ModelData] = {}
+    last_model_info = None
     for item in csv_rows:
         if has_optional_model_attr:
             opt_model_attr = item.optional_model_attribute
@@ -264,8 +269,16 @@ def read_csv_data(csv_rows: Iterator[CSVItem], has_optional_model_attr: bool) ->
                                opt_model_attr)
         if model_info not in data:
             data[model_info] = ModelData()
+        else:
+            '''consistency check for duplicates in CSV
+            - If there is already such a model_info in data we have proceeded the same IR.
+            - If previous entry in CSV file was not the same as current, we proceeded the same IR,
+              than there was another IR and now we have duplicate of model IR data   
+            '''
+            assert last_model_info is None or last_model_info == model_info, \
+                f'duplicate of {model_info} in CSV'
         data[model_info].append(item)
-    check_csv_data(data)
+        last_model_info = model_info
     return data
 
 
@@ -519,13 +532,24 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
     return header, sort_table(table, get_max_delta)
 
 
-def check_csv_data(data: Dict[ModelInfo, ModelData]) -> None:
+def check_run_csv_data(data: Dict[ModelInfo, ModelData]) -> None:
     for info, model_data in data.items():
         try:
             model_data.check()
         except AssertionError:
             print(f'assertion error while checking model data {info}')
             raise
+
+
+def check_csv_data(data: List[Dict[ModelInfo, ModelData]]) -> None:
+    if not data:
+        return
+    first_info = next(iter(data[0]))
+    first_device = data[0][first_info].get_device()
+    assert all(m_data.get_device() == first_device for d in data for _, m_data in d.items()), \
+        f'different devices found in input data'
+    for csv_data in data:
+        check_run_csv_data(csv_data)
 
 
 def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
@@ -536,6 +560,7 @@ def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
         csv_rows = read_csv(csv_path)
         current_csv_data = read_csv_data(csv_rows, has_optional_model_attr)
         csv_data.append(current_csv_data)
+    check_csv_data(csv_data)
     return csv_data
 
 
@@ -1072,5 +1097,5 @@ def main(config: Config) -> None:
 
 if __name__ == '__main__':
     Unit.USE_ONLY_0_ITER_GPU = True
-    Unit.USE_ONLY_0_ITER_CPU = False
+    Unit.USE_ONLY_0_ITER = False
     main(parse_args())

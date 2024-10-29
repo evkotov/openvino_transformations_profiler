@@ -8,7 +8,7 @@ import numpy as np
 PlotDots = namedtuple('PlotDots', ['x_values', 'y_values', 'label'])
 Stripe = namedtuple('Stripe', ['lower_bound', 'upper_bound', 'label'])
 Xline = namedtuple('Xline', ['y_value', 'label', 'color', 'style'])
-
+PlotDotsWithXline = namedtuple('PlotDotsWithXline', ['x_values', 'y_values', 'y_line_value', 'line_style', 'line_label'])
 
 def generate_x_ticks_cast_to_int(x_values: List[float]):
     return np.arange(int(min(x_values)), int(max(x_values)) + 1, 1)
@@ -19,7 +19,8 @@ class Plot:
         self.__title = title
         self.__x_label = x_label
         self.__y_label = y_label
-        self.__graphs = [] # list of tuples (x_values, y_values)
+        self.__graphs: List[PlotDots] = []
+        self.__graphs_with_xline: List[PlotDotsWithXline] = []
         self.__x_lines = []
         self.__stripe: Optional[Stripe] = None
         self.__plot_size = (8, 5)
@@ -35,6 +36,9 @@ class Plot:
     def add(self, x_values: List, y_values: List[float], label: Optional[str] = None):
         self.__graphs.append(PlotDots(x_values, y_values, label))
 
+    def add_with_xline(self, x_values: List, y_values: List[float], y_line_value: float, line_style: str, line_label: str):
+        self.__graphs_with_xline.append(PlotDotsWithXline(x_values, y_values, y_line_value, line_style, line_label))
+
     def set_stripe(self, lower_bound: float, upper_bound: float, label: str):
         self.__stripe = Stripe(lower_bound, upper_bound, label)
 
@@ -49,13 +53,20 @@ class Plot:
 
         plt.figure(figsize=self.__plot_size)
 
-        first_x_values, first_y_values, label = self.__graphs[0]
-        all_x_values = set(first_x_values)
+        all_x_values = set()
         for graph_item in self.__graphs:
             plt.plot(graph_item.x_values, graph_item.y_values, marker='o', label=graph_item.label)
-            if label:
+            if graph_item.label:
                 need_a_legend = True
             all_x_values.update(graph_item.x_values)
+        for graph_item in self.__graphs_with_xline:
+            line, = plt.plot(graph_item.x_values, graph_item.y_values, marker='o')
+            line_color = line.get_color()
+            plt.axhline(y=graph_item.y_line_value, linestyle=graph_item.line_style,
+                        label=graph_item.line_label, color=line_color)
+            need_a_legend = True
+            all_x_values.update(graph_item.x_values)
+
         # Adding labels and title
         plt.title(self.__title)
         plt.xlabel(self.__x_label)
