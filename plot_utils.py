@@ -79,9 +79,9 @@ class Plot:
             need_a_legend = True
 
         if self.__stripe is not None:
-            all_x_values_sorted = sorted(all_x_values)
+            x_min, x_max = plt.gca().get_xlim()
             # Add a stripe representing 10% deviation from the median
-            plt.fill_between(all_x_values_sorted,
+            plt.fill_between([x_min, x_max],
                              self.__stripe.lower_bound, self.__stripe.upper_bound,
                              color='green', alpha=0.2, label=self.__stripe.label)
             need_a_legend = True

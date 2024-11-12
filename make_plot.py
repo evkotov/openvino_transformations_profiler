@@ -1,23 +1,24 @@
 import csv
 import os
 import sys
-from typing import List, Iterator, Dict, Optional
+from typing import List, Iterator, Dict, Optional, Tuple
 import numpy as np
 
 from compare_csv import ModelInfo, get_csv_data, get_device, sort_table
 from stat_utils import (
     get_iter_time_values, compile_time_by_iterations,
     get_stddev_unit_durations_all_csv, get_sum_units_durations_by_iteration,
-    get_model_unit_sum_by_iterations_all_csv, get_model_units_deviations_by_iter_all_csv
+    get_model_unit_sum_by_iterations_all_csv, get_model_units_deviations_by_iter_all_csv,
+    Unit
 )
-from plot_utils import Plot, Hist, ScatterPlot
+from plot_utils import Plot, Hist, ScatterPlot, generate_x_ticks_cast_to_int
 
 
 def gen_compile_time_by_iterations_multiple_median(device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
                                    what: str, file_prefix: str):
     title = f'{what} {device} {model_info.framework} {model_info.name} {model_info.precision}'
-    if model_info.optional_attribute:
-        title += f' {model_info.optional_attribute}'
+    if model_info.config:
+        title += f' {model_info.config}'
     x_label = 'Job run time (seconds)'
     y_label = f'{what} (seconds)'
     plot = Plot(title, x_label, y_label)
@@ -31,24 +32,28 @@ def gen_compile_time_by_iterations_multiple_median(device: str, model_info: Mode
         plot.add_with_xline(iterations, compile_time_values, median_value, ':', median_label)
 
     path = f'{file_prefix}_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}'
-    if model_info.optional_attribute:
-        path += f'_{model_info.optional_attribute}'
+    if model_info.config:
+        path += f'_{model_info.config}'
     path += '.png'
     plot.plot(path)
 
 
-def gen_compile_time_by_iterations_one_common_median(device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
-                                                   what: str, file_prefix: str):
+def gen_compile_time_by_iterations_one_common_median(output_dir: str,
+                                                     device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
+                                                     what: str, file_prefix: str):
     title = f'{what} {device} {model_info.framework} {model_info.name} {model_info.precision}'
-    if model_info.optional_attribute:
-        title += f' {model_info.optional_attribute}'
-    x_label = 'Job run time (seconds)'
+    if model_info.config:
+        title += f' {model_info.config}'
+    x_label = 'iteration number'
     y_label = f'{what} (seconds)'
+
     plot = Plot(title, x_label, y_label)
+    plot.set_x_ticks_func(generate_x_ticks_cast_to_int)
+
     all_compile_time_values = []
     for durations in model_data_items:
         compile_time_values = [float(duration) / 1_000_000_000 for duration in durations]
-        iterations = get_iter_time_values(compile_time_values)
+        iterations = [i for i in range(1, len(compile_time_values) + 1)]
         all_compile_time_values.extend(compile_time_values)
 
         assert len(compile_time_values) == len(iterations)
@@ -67,36 +72,36 @@ def gen_compile_time_by_iterations_one_common_median(device: str, model_info: Mo
     max_deviation = abs(median_value - max_deviation_abs) * 100.0 / median_value
 
     if max_deviation > 1.0:
-            # Calculate 10% deviation from the median
+        # Calculate 10% deviation from the median
         deviation = 0.01 * median_value
         lower_bound = median_value - deviation
         upper_bound = median_value + deviation
         plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
 
-    path = f'{file_prefix}_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}'
-    if model_info.optional_attribute:
-        path += f'_{model_info.optional_attribute}'
+    path = os.path.join(output_dir, f'{file_prefix}_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
+    if model_info.config:
+        path += f'_{model_info.config}'
     path += '.png'
     plot.plot(path)
 
 
 def gen_hist_values(device: str, model_info: ModelInfo, values: List[float]):
     title = f'Ratio stddev/median {device} {model_info.framework} {model_info.name} {model_info.precision}'
-    if model_info.optional_attribute:
-        title += f' {model_info.optional_attribute}'
+    if model_info.config:
+        title += f' {model_info.config}'
     x_label = 'Ratio stddev/median'
     y_label = 'Number of values'
     hist = Hist(title, x_label, y_label)
     hist.set_values(values)
     hist.set_bins(160)
     path = f'hist_stddev_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}'
-    if model_info.optional_attribute:
-        path += f'_{model_info.optional_attribute}'
+    if model_info.config:
+        path += f'_{model_info.config}'
     path += '.png'
     hist.plot(path)
 
 
-def gen_compile_time_by_iterations_from_input(inputs: List[str], model_name: Optional[str]):
+def gen_compile_time_by_iterations_from_input(output_dir: str, inputs: List[str], model_name: Optional[str]):
     csv_data = get_csv_data(inputs)
     if not csv_data:
         return
@@ -104,16 +109,18 @@ def gen_compile_time_by_iterations_from_input(inputs: List[str], model_name: Opt
     for model_info, durations in compile_time_by_iterations(csv_data):
         if model_name and model_info.name != model_name:
             continue
-        gen_compile_time_by_iterations_one_common_median(device, model_info, durations, 'Compile time', 'compile_time')
+        gen_compile_time_by_iterations_one_common_median(output_dir, device, model_info, durations, 'Compile time', 'compile_time')
 
 
-def gen_transformations_sum_time_by_iterations_from_input(inputs: List[str], unit_type: str):
+def gen_transformations_sum_time_by_iterations_from_input(output_dir: str, inputs: List[str], unit_type: str, model_name: Optional[str]):
     csv_data = get_csv_data(inputs)
     if not csv_data:
         return
     device = get_device(csv_data)
     for model_info, durations in get_sum_units_durations_by_iteration(csv_data, unit_type):
-        gen_compile_time_by_iterations_one_common_median(device, model_info, durations, 'Sum of transformations', 'sum_ts')
+        if model_name and model_info.name != model_name:
+            continue
+        gen_compile_time_by_iterations_one_common_median(output_dir, device, model_info, durations, 'Sum of transformations', 'sum_ts')
 
 
 def gen_stddev_units_from_input(inputs: List[str], unit_type: str, min_median: float):
@@ -236,13 +243,35 @@ def get_input_csv_files(inputs: List[str]) -> List[str]:
             csv_files.extend(get_all_csv(input_path))
         elif input_path.endswith('.csv'):
             csv_files.append(input_path)
-    return csv_files
+    return sorted(csv_files)
+
+
+def find_csv_files_in_subdirs(input_dir: str) -> Iterator[Tuple[str, List[str]]]:
+    for root, dirs, files in os.walk(input_dir):
+        csv_files = [os.path.join(root, file) for file in files if file.endswith('.csv')]
+        if csv_files:
+            yield root, csv_files
+    return
+
+
+def process_and_replicate_structure(input_dir: str, output_dir: str, function):
+    for input_dir_path, csv_file_paths in find_csv_files_in_subdirs(input_dir):
+        output_dir_path = os.path.join(output_dir, os.path.relpath(input_dir_path, input_dir))
+        if not os.path.exists(output_dir_path):
+            os.makedirs(output_dir_path)
+        function(csv_file_paths, output_dir_path)
 
 
 if __name__ == '__main__':
+    Unit.USE_ONLY_0_ITER_GPU = False
+    '''
+    def gen_compile_time(input_files: List[str], output_dir: str):
+        gen_compile_time_by_iterations_from_input(output_dir, input_files, None)
+    process_and_replicate_structure(sys.argv[1], sys.argv[2], gen_compile_time)
+    '''
     inputs = get_input_csv_files(sys.argv[1:])
-    gen_compile_time_by_iterations_from_input(inputs, None)
+    gen_compile_time_by_iterations_from_input('.', inputs, 'qwen2-7b')
     #gen_stddev_units_from_input(inputs, 'transformation', 1.0)
-    #gen_transformations_sum_time_by_iterations_from_input(inputs, 'transformation')
+    gen_transformations_sum_time_by_iterations_from_input('.', inputs,'transformation', 'qwen2-7b')
     #gen_csv_transformations_sum_time_by_iterations_from_input(inputs, 'transformation')
     #gen_deviation_units_from_input(inputs, 'transformation', 1.0)

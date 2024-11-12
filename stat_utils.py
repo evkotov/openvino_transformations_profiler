@@ -50,7 +50,7 @@ def get_stddev_unit_durations_all_csv(csv_data: List[Dict[ModelInfo, ModelData]]
 
 
 def get_model_sum_units_durations_by_iteration(model_data: ModelData, unit_type: str) -> List[float]:
-    units = model_data.get_items_with_type(unit_type)
+    units = model_data.get_units_with_type(unit_type)
     durations = np.fromiter((num for unit in units for num in unit.get_durations()), float)
     n_iterations = model_data.get_n_iterations()
     durations = durations.reshape(-1, n_iterations)
@@ -67,7 +67,7 @@ def get_sum_units_durations_by_iteration(csv_data: List[Dict[ModelInfo, ModelDat
 
 def get_model_unit_sum_by_iterations(model_data: ModelData, unit_type: str) -> Dict[str, List[float]]:
     units: Dict[str, List[Unit]] = {}
-    for unit in model_data.get_items_with_type(unit_type):
+    for unit in model_data.get_units_with_type(unit_type):
         if unit.name not in units:
             units[unit.name] = []
         units[unit.name].append(unit)
@@ -94,7 +94,7 @@ Deviation = namedtuple('Deviation', ['median', 'deviation'])
 Deviations = List[Deviation]
 
 def get_model_units_deviations_by_iter(model_data: ModelData, unit_type: str) -> List[Deviations]:
-    units = model_data.get_items_with_type(unit_type)
+    units = model_data.get_units_with_type(unit_type)
     n_iterations = model_data.get_n_iterations()
     deviations: List[List] = [[] for _ in range(n_iterations)]
     for unit in units:

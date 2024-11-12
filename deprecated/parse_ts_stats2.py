@@ -437,7 +437,7 @@ def iteration_statistics_in_comparison(data: List[Dict[ModelInfo, ModelData]],
                             unit_type: str) -> Dict[str, Total]:
         result: Dict[str, Total] = {} # ts name: Total
         for model_info, model_data in data.items():
-            for item in model_data.get_items_with_type(unit_type):
+            for item in model_data.get_units_with_type(unit_type):
                 if item.name not in result:
                     result[item.name] = Total(0.0, 0)
                 item_duration = item.get_duration_median_first_iterations(n_iterations)

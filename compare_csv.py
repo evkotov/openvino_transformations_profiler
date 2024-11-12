@@ -1,20 +1,18 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 import argparse
 from collections import namedtuple
 import csv
 from dataclasses import dataclass, field
 import os
+from pathlib import Path
 import sys
 from tabulate import tabulate
 from typing import List, Dict, Tuple, Iterator, Set, Optional
 
+
 import numpy as np
-
-
-def get_csv_header(path: str) -> List[str]:
-    with open(path, 'r') as f_in:
-        csv_reader = csv.reader(f_in, delimiter=';')
-        return next(csv_reader)
 
 
 CSVColumnNames = ('device',
@@ -22,7 +20,7 @@ CSVColumnNames = ('device',
                   'model_name',
                   'model_framework',
                   'model_precision',
-                  'optional_model_attribute',
+                  'config', # optional_model_attribute, weight_compression
                   'iteration',
                   'type',
                   'transformation_name',
@@ -31,6 +29,91 @@ CSVColumnNames = ('device',
 
 
 CSVItem = namedtuple('CSVItem', CSVColumnNames)
+
+
+def is_header_valid(column_names: List[str]) -> bool:
+    idx_expected_name = 0
+    idx_real_name = 0
+    while idx_expected_name < len(CSVColumnNames) and idx_real_name < len(column_names):
+        expected_name = CSVColumnNames[idx_expected_name]
+        real_name = column_names[idx_real_name]
+        if expected_name == real_name:
+            idx_expected_name += 1
+            idx_real_name += 1
+        elif expected_name == 'device':
+            idx_expected_name += 1
+        elif expected_name == 'config':
+            if real_name == 'optional_model_attribute' or \
+               real_name == 'weight_compression':
+                idx_expected_name += 1
+                idx_real_name += 1
+            else:
+                idx_expected_name += 1
+        else:
+            return False
+
+    return idx_expected_name == len(CSVColumnNames) and \
+        idx_real_name == len(column_names)
+
+
+def check_header(column_names: List[str]) -> None:
+    assert is_header_valid(column_names),\
+        f"invalid header expected {CSVColumnNames} but got {column_names}"
+
+
+def get_config_value_from_path(path: str, config_values_cache: Dict[str, str]) -> str:
+    if path in config_values_cache:
+        return config_values_cache[path]
+
+    def get_attr(path: str) -> str:
+        try:
+            p = Path(path)
+            # Attempt to resolve the path to validate its syntax
+            p.resolve()
+            parts = [str(e) for e in p.parts]
+            if len(parts) < 3:
+                return ''
+            return parts[-2]
+        except Exception:
+            return ''
+    attr = get_attr(path)
+    config_values_cache[path] = attr
+    return attr
+
+
+def get_csv_header(path: str) -> List[str]:
+    with open(path) as f_in:
+        csv_reader = csv.reader(f_in, delimiter=';')
+        return next(csv_reader)
+
+
+def read_csv(path: str) -> Iterator[CSVItem]:
+    config_values_cache = {}
+    with open(path) as f_in:
+        csv_reader = csv.reader(f_in, delimiter=';')
+        column_names = next(csv_reader)
+        check_header(column_names)
+        has_config = 'optional_model_attribute' in column_names or \
+                     'weight_compression' in column_names or \
+                     'config' in column_names
+        has_device = 'device' in column_names
+        for row in csv_reader:
+            # if it's header inside CSV file
+            if row[-1] == 'duration':
+                continue
+            if not has_device:
+                row.insert(0, 'N/A')
+            if not has_config:
+                row.insert(5, '')
+            if not row[5]:
+                model_path = row[1]
+                row[5] = get_config_value_from_path(model_path, config_values_cache)
+            try:
+                csv_item = CSVItem(*row)
+            except:
+                print(f'exception in row {row}')
+                raise
+            yield csv_item
 
 
 class Unit:
@@ -55,30 +138,34 @@ class Unit:
         self.__deviations: Optional[List[float]] = None
 
     def get_n_durations(self) -> int:
+        if self.use_only_first_iter():
+            return len(self.__durations[:1])
         return len(self.__durations)
 
     def get_durations(self) -> List[float]:
+        if self.use_only_first_iter():
+            return self.__durations[:1]
         return self.__durations
+
+    def use_only_first_iter(self) -> bool:
+        return Unit.USE_ONLY_0_ITER_GPU and self.device == 'GPU' or \
+               Unit.USE_ONLY_0_ITER
 
     def get_duration_median(self) -> float:
         if not self.__durations:
             return 0.0
         if self.__duration_median is None:
-            if (Unit.USE_ONLY_0_ITER_GPU and self.device == 'GPU' or
-                    Unit.USE_ONLY_0_ITER):
-                self.__duration_median = self.__durations[0]
-            else:
-                self.__duration_median = float(np.median(self.__durations))
+            self.__duration_median = float(np.median(self.get_durations()))
         return self.__duration_median
 
     def get_deviations(self) -> List[float]:
         if self.__deviations is None:
             median = self.get_duration_median()
-            self.__deviations = [abs(item - median) for item in self.__durations]
+            self.__deviations = [abs(item - median) for item in self.get_durations()]
         return self.__deviations
 
     def get_duration_stddev(self) -> float:
-        return float(np.std(self.__durations))
+        return float(np.std(self.get_durations()))
 
     def get_variations_as_ratio(self) -> List[float]:
         if self.__deviations is None:
@@ -102,43 +189,6 @@ class Unit:
         self.__duration_median = None
 
 
-def check_header(column_names: List[str]) -> None:
-    column_names = set(column_names)
-    for name in CSVColumnNames:
-        if name == 'optional_model_attribute' or name == 'device':
-            # no such columns in old CSV files
-            continue
-        assert name in column_names
-
-
-def csv_has_optional_model_attr(path: str) -> bool:
-    with open(path, 'r') as f_in:
-        column_names = get_csv_header(path)
-        return 'optional_model_attribute' in column_names
-
-
-def read_csv(path: str) -> Iterator[CSVItem]:
-    with open(path, 'r') as f_in:
-        column_names = get_csv_header(path)
-        check_header(column_names)
-        has_optional_model_attr = 'optional_model_attribute' in column_names
-        has_device = 'device' in column_names
-        csv_reader = csv.reader(f_in, delimiter=';')
-        for row in csv_reader:
-            if row[-1] == 'duration':
-                continue
-            if not has_optional_model_attr:
-                row.insert(4, '')
-            if not has_device:
-                row.insert(0, 'N/A')
-            try:
-                csv_item = CSVItem(*row)
-            except:
-                print(f'exception in row {row}')
-                raise
-            yield csv_item
-
-
 UnitInfo = namedtuple('UnitInfo', ['type',
                                    'transformation_name',
                                    'manager_name'])
@@ -155,6 +205,8 @@ class ModelData:
         assert n_iteration > 0
         assert n_iteration >= self.__last_iter_num, \
             'consistency error: the iteration numbers must follow in ascending order'
+        assert n_iteration == self.__last_iter_num or \
+            n_iteration == self.__last_iter_num + 1
         self.__last_iter_num = n_iteration
         if n_iteration == 1:
             self.items.append(Unit(csv_item))
@@ -170,28 +222,32 @@ class ModelData:
         # assume that all data were collected on one device
         return self.items[0].device
 
-    def get_items(self, filter_item_func) -> Iterator[Unit]:
+    def get_units(self, filter_item_func) -> Iterator[Unit]:
         for item in self.items:
             if filter_item_func(item):
                 yield item
 
-    def get_items_with_type(self, type_name: str) -> Iterator[Unit]:
-        return self.get_items(lambda item: item.type == type_name)
+    def get_units_with_type(self, type_name: str) -> Iterator[Unit]:
+        return self.get_units(lambda item: item.type == type_name)
 
     def collect_items_by_type(self, type_name: str) -> Dict[str, List[Unit]]:
         result: Dict[str, List[Unit]] = {}
-        for item in self.get_items_with_type(type_name):
+        for item in self.get_units_with_type(type_name):
             if item.name not in result:
                 result[item.name] = []
             result[item.name].append(item)
         return result
 
     def get_compile_time(self) -> float:
-        item = next(self.get_items_with_type('compile_time'))
+        item = next(self.get_units_with_type('compile_time'))
         return item.get_duration_median()
 
+    def sum_transformation_time(self) -> float:
+        units = self.get_units_with_type('transformation')
+        return sum(unit.get_duration_median() for unit in units)
+
     def get_compile_durations(self) -> List[float]:
-        item = next(self.get_items_with_type('compile_time'))
+        item = next(self.get_units_with_type('compile_time'))
         return item.get_durations()
 
     def get_duration(self, i: int) -> float:
@@ -223,7 +279,7 @@ class ModelData:
         assert all(e == n_iteration_items[0] for e in n_iteration_items), \
             f'different number of items in different iterations: {n_iteration_items}'
         # check if there is compile time in each iteration
-        n_compile_time_items = sum(1 for _ in self.get_items_with_type('compile_time'))
+        n_compile_time_items = sum(1 for _ in self.get_units_with_type('compile_time'))
         assert n_compile_time_items == 1, \
             f'iteration data must consists exact 1 compile_time item but there are: {n_compile_time_items}'
 
@@ -231,42 +287,17 @@ class ModelData:
 ModelInfo = namedtuple('ModelInfo', ['framework',
                                      'name',
                                      'precision',
-                                     'optional_attribute'])
+                                     'config'])
 
 
-optional_model_attr_cache = {}
-
-
-def get_optional_model_attr(path: str) -> str:
-    if path in optional_model_attr_cache:
-        return optional_model_attr_cache[path]
-    if 'compressed_weights' not in path:
-        return ''
-
-    def get_path_components(path: str) -> List[str]:
-        result = []
-        while path != '/' and path != '\\':
-            result.append(os.path.basename(path))
-            path = os.path.dirname(path)
-        return result
-    components = get_path_components(path)
-    attr = components[1]
-    optional_model_attr_cache[path] = attr
-    return attr
-
-
-def read_csv_data(csv_rows: Iterator[CSVItem], has_optional_model_attr: bool) -> Dict[ModelInfo, ModelData]:
+def read_csv_data(csv_rows: Iterator[CSVItem]) -> Dict[ModelInfo, ModelData]:
     data: Dict[ModelInfo, ModelData] = {}
     last_model_info = None
     for item in csv_rows:
-        if has_optional_model_attr:
-            opt_model_attr = item.optional_model_attribute
-        else:
-            opt_model_attr = get_optional_model_attr(item.model_path)
         model_info = ModelInfo(item.model_framework,
                                item.model_name,
                                item.model_precision,
-                               opt_model_attr)
+                               item.config)
         if model_info not in data:
             data[model_info] = ModelData()
         else:
@@ -288,7 +319,7 @@ def get_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]
     common_keys = data[0].keys()
     for csv_data in data:
         common_keys = common_keys & csv_data.keys()
-    return common_keys
+    return list(common_keys)
 
 
 def filter_by_models(data: List[Dict[ModelInfo, ModelData]],
@@ -352,7 +383,7 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
         column_names = ['framework',
                         'name',
                         'precision',
-                        'optional model attribute']
+                        'config']
         for csv_idx in range(n_csv_files):
             column_names.append(f'compile time #{csv_idx + 1} (secs)')
         for csv_idx in range(1, n_csv_files):
@@ -375,7 +406,7 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
         row = {'framework': model_info.framework,
                'name': model_info.name,
                'precision': model_info.precision,
-               'optional model attribute': model_info.optional_attribute}
+               'config': model_info.config}
         compile_times = [model_data.get_compile_time() / 1_000_000_000 if model_data is not None else None
                          for model_data in model_data_items]
         for csv_idx in range(n_cvs_files):
@@ -391,6 +422,62 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
             if compile_times[0] is not None and compile_times[csv_idx] is not None and compile_times[0] != 0.0:
                 ratio = compile_times[csv_idx] / compile_times[0]
             row[f'compile time #{csv_idx + 1}/#1'] = ratio
+        table.append(row)
+
+    delta_header_names = get_delta_header_names(n_cvs_files)
+    def get_max_delta(row: Dict) -> float:
+        return max((abs(row[key]) for key in delta_header_names if isinstance(row[key], float)),
+                   default=None)
+    return header, sort_table(table, get_max_delta)
+
+
+def compare_sum_transformation_time(data: List[Dict[ModelInfo, ModelData]]):
+    if len(data) == 0:
+        return [], []
+
+    def create_header(n_csv_files: int):
+        column_names = ['framework',
+                        'name',
+                        'precision',
+                        'config']
+        for csv_idx in range(n_csv_files):
+            column_names.append(f'time #{csv_idx + 1} (ms)')
+        for csv_idx in range(1, n_csv_files):
+            column_names.append(f'time #{csv_idx + 1} - #1 (ms)')
+        for csv_idx in range(1, n_csv_files):
+            column_names.append(f'time #{csv_idx + 1}/#1')
+        return column_names
+
+    def get_delta_header_names(n_csv_files: int) -> List[str]:
+        column_names = []
+        for csv_idx in range(1, n_csv_files):
+            column_names.append(f'time #{csv_idx + 1} - #1 (ms)')
+        return column_names
+
+
+    n_cvs_files = len(data)
+    header = create_header(n_cvs_files)
+    table = []
+    for model_info, model_data_items in full_join_by_model_info(data):
+        row = {'framework': model_info.framework,
+               'name': model_info.name,
+               'precision': model_info.precision,
+               'config': model_info.config}
+        compile_times = [model_data.sum_transformation_time() / 1_000_000 if model_data is not None else None
+                         for model_data in model_data_items]
+        for csv_idx in range(n_cvs_files):
+            value = compile_times[csv_idx] if compile_times[csv_idx] is not None else 'N/A'
+            row[f'time #{csv_idx + 1} (ms)'] = value
+        for csv_idx in range(1, n_cvs_files):
+            delta = 'N/A'
+            if compile_times[0] is not None and compile_times[csv_idx] is not None:
+                delta = compile_times[csv_idx] - compile_times[0]
+            row[f'time #{csv_idx + 1} - #1 (ms)'] = delta
+        for csv_idx in range(1, n_cvs_files):
+            ratio = 'N/A'
+            if compile_times[0] is not None and compile_times[csv_idx] is not None and compile_times[0] != 0.0:
+                ratio = compile_times[csv_idx] / compile_times[0]
+            row[f'time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
 
     delta_header_names = get_delta_header_names(n_cvs_files)
@@ -556,9 +643,8 @@ def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
     csv_data = []
     for csv_path in csv_paths:
         print(f'reading {csv_path} ...')
-        has_optional_model_attr = csv_has_optional_model_attr(csv_path)
         csv_rows = read_csv(csv_path)
-        current_csv_data = read_csv_data(csv_rows, has_optional_model_attr)
+        current_csv_data = read_csv_data(csv_rows)
         csv_data.append(current_csv_data)
     check_csv_data(csv_data)
     return csv_data
@@ -580,8 +666,8 @@ def make_model_file_name(model_info: ModelInfo, prefix: str) -> str:
             model_info.framework,
             model_info.name,
             model_info.precision]
-    if model_info.optional_attribute:
-        name.append(model_info.optional_attribute)
+    if model_info.config:
+        name.append(model_info.config)
     return '_'.join(name) + '.csv'
 
 
@@ -589,8 +675,8 @@ def make_model_console_description(model_info: ModelInfo) -> str:
     name = [model_info.framework,
             model_info.name,
             model_info.precision]
-    if model_info.optional_attribute:
-        name.append(model_info.optional_attribute)
+    if model_info.config:
+        name.append(model_info.config)
     return ' '.join(name)
 
 
@@ -754,6 +840,22 @@ class CompareCompileTime(DataProcessor):
             output.write(table)
 
 
+class CompareSumTransformationTime(DataProcessor):
+    def __init__(self, output_factory: SingleOutputFactory):
+        super().__init__(output_factory)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing sum transformation time ...')
+        # CSV files can store different models info
+        if not csv_data:
+            print('no common models to compare compilation time ...')
+            return
+        header, table = compare_sum_transformation_time(csv_data)
+        with self.output_factory.create(header) as output:
+            output.write_header()
+            output.write(table)
+
+
 class GenerateLongestUnitsOverall(DataProcessor):
     def __init__(self, output_factory: SingleOutputFactory, unit_type: str):
         super().__init__(output_factory)
@@ -813,6 +915,7 @@ class CompareSumUnitsPerModel(DataProcessor):
 @dataclass
 class Config:
     compare_compile_time = None
+    compare_sum_transformation_time = None
     transformations_overall = None
     manager_overall = None
     transformations_per_model = None
@@ -838,6 +941,9 @@ For example, if you have 2 input CSV files /dir1/file1.csv and /dir2/file2.csv, 
     args_parser.add_argument('--compare_compile_time', nargs='?', type=str, default=None,
                              const='compile_time_comparison.csv',
                              help='compare compile time between input files; for common models between inputs')
+    args_parser.add_argument('--compare_sum_transformation_time', nargs='?', type=str, default=None,
+                             const='transformation_sum_time_comparison.csv',
+                             help='compare sum transformation time between input files; for common models between inputs')
     args_parser.add_argument('--transformations_overall', nargs='?', type=str, default=None,
                              const='transformations_overall.csv',
                              metavar='path to output file',
@@ -1001,6 +1107,7 @@ For example, to output only first 15 rows in table
     config.output_type = args.output_type
 
     config.compare_compile_time = args.compare_compile_time
+    config.compare_sum_transformation_time = args.compare_sum_transformation_time
     config.transformations_overall = args.transformations_overall
     config.manager_overall = args.manager_overall
     config.transformations_per_model = args.transformations_per_model
@@ -1034,6 +1141,12 @@ def main(config: Config) -> None:
                                                       'compilation time',
                                                       config.limit_output)
         data_processors.append(CompareCompileTime(output_factory))
+    if config.compare_sum_transformation_time:
+        output_factory = create_single_output_factory(config.output_type,
+                                                      config.compare_sum_transformation_time,
+                                                      'sum transformation time',
+                                                      config.limit_output)
+        data_processors.append(CompareSumTransformationTime(output_factory))
     if config.transformations_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.transformations_overall,
