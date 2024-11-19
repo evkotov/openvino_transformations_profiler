@@ -5,7 +5,6 @@ import argparse
 from collections import namedtuple
 import csv
 from dataclasses import dataclass, field
-import os
 from pathlib import Path
 import sys
 from tabulate import tabulate
@@ -117,8 +116,10 @@ def read_csv(path: str) -> Iterator[CSVItem]:
 
 
 class Unit:
-    USE_ONLY_0_ITER_GPU = False
-    USE_ONLY_0_ITER = False
+    USE_ONLY_0_ITER_GPU: bool = False
+    USE_ONLY_0_ITER: bool = False
+    ONLY_FIRST_N_ITER_NUM: Optional[int] = None
+    USE_NO_CACHE: bool = False
 
     def __init__(self, csv_item: CSVItem):
         self.name = None
@@ -136,30 +137,36 @@ class Unit:
         self.__durations: List[float] = [float(csv_item.duration)]
         self.__duration_median: Optional[float] = None
         self.__deviations: Optional[List[float]] = None
+        self.__n_durations: Optional[int] = None
 
     def get_n_durations(self) -> int:
-        if self.use_only_first_iter():
-            return len(self.__durations[:1])
-        return len(self.__durations)
+        if self.__n_durations is None or Unit.USE_NO_CACHE:
+            num_iterations = [len(self.__durations)]
+            if Unit.ONLY_FIRST_N_ITER_NUM is not None:
+                num_iterations.append(Unit.ONLY_FIRST_N_ITER_NUM)
+            if self.use_only_first_iter():
+                num_iterations.append(1)
+            self.__n_durations = min(num_iterations)
+        return self.__n_durations
 
     def get_durations(self) -> List[float]:
-        if self.use_only_first_iter():
-            return self.__durations[:1]
-        return self.__durations
+        return self.__durations[:self.get_n_durations()]
 
     def use_only_first_iter(self) -> bool:
         return Unit.USE_ONLY_0_ITER_GPU and self.device == 'GPU' or \
                Unit.USE_ONLY_0_ITER
 
     def get_duration_median(self) -> float:
-        if not self.__durations:
-            return 0.0
-        if self.__duration_median is None:
-            self.__duration_median = float(np.median(self.get_durations()))
+        if self.__duration_median is None or Unit.USE_NO_CACHE:
+            durations = self.get_durations()
+            if not durations:
+                self.__duration_median = 0.0
+            else:
+                self.__duration_median = float(np.median(durations))
         return self.__duration_median
 
     def get_deviations(self) -> List[float]:
-        if self.__deviations is None:
+        if self.__deviations is None or Unit.USE_NO_CACHE:
             median = self.get_duration_median()
             self.__deviations = [abs(item - median) for item in self.get_durations()]
         return self.__deviations
@@ -168,7 +175,7 @@ class Unit:
         return float(np.std(self.get_durations()))
 
     def get_variations_as_ratio(self) -> List[float]:
-        if self.__deviations is None:
+        if self.__deviations is None or Unit.USE_NO_CACHE:
             median = self.get_duration_median()
             self.__deviations = []
             for item in self.__durations:
@@ -318,7 +325,7 @@ def get_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]
         return []
     common_keys = data[0].keys()
     for csv_data in data:
-        common_keys = common_keys & csv_data.keys()
+        common_keys &= csv_data.keys()
     return list(common_keys)
 
 
@@ -619,15 +626,6 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
     return header, sort_table(table, get_max_delta)
 
 
-def check_run_csv_data(data: Dict[ModelInfo, ModelData]) -> None:
-    for info, model_data in data.items():
-        try:
-            model_data.check()
-        except AssertionError:
-            print(f'assertion error while checking model data {info}')
-            raise
-
-
 def check_csv_data(data: List[Dict[ModelInfo, ModelData]]) -> None:
     if not data:
         return
@@ -635,8 +633,17 @@ def check_csv_data(data: List[Dict[ModelInfo, ModelData]]) -> None:
     first_device = data[0][first_info].get_device()
     assert all(m_data.get_device() == first_device for d in data for _, m_data in d.items()), \
         f'different devices found in input data'
-    for csv_data in data:
-        check_run_csv_data(csv_data)
+
+
+def remove_invalid_items(data: Dict[ModelInfo, ModelData]) -> Dict[ModelInfo, ModelData]:
+    valid_data = {}
+    for model_info, model_data in data.items():
+        try:
+            model_data.check()
+            valid_data[model_info] = model_data
+        except AssertionError as e:
+            print(f'Removed invalid model data: {model_info} due to: {e}')
+    return valid_data
 
 
 def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
@@ -645,7 +652,9 @@ def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
         print(f'reading {csv_path} ...')
         csv_rows = read_csv(csv_path)
         current_csv_data = read_csv_data(csv_rows)
-        csv_data.append(current_csv_data)
+        current_csv_data = remove_invalid_items(current_csv_data)
+        if current_csv_data:
+            csv_data.append(current_csv_data)
     check_csv_data(csv_data)
     return csv_data
 

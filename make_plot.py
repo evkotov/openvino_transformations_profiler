@@ -241,7 +241,7 @@ def get_input_csv_files(inputs: List[str]) -> List[str]:
     for input_path in inputs:
         if os.path.isdir(input_path):
             csv_files.extend(get_all_csv(input_path))
-        elif input_path.endswith('.csv'):
+        else:
             csv_files.append(input_path)
     return sorted(csv_files)
 

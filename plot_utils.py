@@ -9,6 +9,7 @@ PlotDots = namedtuple('PlotDots', ['x_values', 'y_values', 'label'])
 Stripe = namedtuple('Stripe', ['lower_bound', 'upper_bound', 'label'])
 Xline = namedtuple('Xline', ['y_value', 'label', 'color', 'style'])
 PlotDotsWithXline = namedtuple('PlotDotsWithXline', ['x_values', 'y_values', 'y_line_value', 'line_style', 'line_label'])
+StripeNoneLine = namedtuple('StripeNoneLine', ['x_values', 'min_y_values', 'max_y_values', 'label'])
 
 def generate_x_ticks_cast_to_int(x_values: List[float]):
     return np.arange(int(min(x_values)), int(max(x_values)) + 1, 1)
@@ -26,6 +27,7 @@ class Plot:
         self.__plot_size = (8, 5)
         self.__legends = []
         self.__gen_x_ticks_func = None
+        self.__stripe_none_line = None
 
     def append_legend(self, label: str):
         self.__legends.append(label)
@@ -35,6 +37,9 @@ class Plot:
 
     def add(self, x_values: List, y_values: List[float], label: Optional[str] = None):
         self.__graphs.append(PlotDots(x_values, y_values, label))
+
+    def add_stripe_non_line(self, x_values, min_y_values, max_y_values, label):
+        self.__stripe_none_line = StripeNoneLine(x_values, min_y_values, max_y_values, label)
 
     def add_with_xline(self, x_values: List, y_values: List[float], y_line_value: float, line_style: str, line_label: str):
         self.__graphs_with_xline.append(PlotDotsWithXline(x_values, y_values, y_line_value, line_style, line_label))
@@ -85,6 +90,12 @@ class Plot:
                              self.__stripe.lower_bound, self.__stripe.upper_bound,
                              color='green', alpha=0.2, label=self.__stripe.label)
             need_a_legend = True
+
+        if self.__stripe_none_line is not None:
+            plt.fill_between(self.__stripe_none_line.x_values,
+                             self.__stripe_none_line.min_y_values,
+                             self.__stripe_none_line.max_y_values,
+                             color='green', alpha=0.2, label=self.__stripe_none_line.label)
 
         if self.__gen_x_ticks_func:
             plt.xticks(ticks=self.__gen_x_ticks_func(all_x_values))
