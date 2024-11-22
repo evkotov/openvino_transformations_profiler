@@ -138,6 +138,7 @@ class Unit:
         self.__duration_median: Optional[float] = None
         self.__deviations: Optional[List[float]] = None
         self.__n_durations: Optional[int] = None
+        self.__duration_mean: Optional[float] = None
 
     def get_n_durations(self) -> int:
         if self.__n_durations is None or Unit.USE_NO_CACHE:
@@ -164,6 +165,15 @@ class Unit:
             else:
                 self.__duration_median = float(np.median(durations))
         return self.__duration_median
+
+    def get_duration_mean(self) -> float:
+        if self.__duration_mean is None or Unit.USE_NO_CACHE:
+            durations = self.get_durations()
+            if not durations:
+                self.__duration_mean = 0.0
+            else:
+                self.__duration_mean = float(np.mean(durations))
+        return self.__duration_mean
 
     def get_deviations(self) -> List[float]:
         if self.__deviations is None or Unit.USE_NO_CACHE:
@@ -431,6 +441,15 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
             row[f'compile time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
 
+    if n_cvs_files == 2:
+        ratios = [abs(1 - row[f'compile time #2/#1']) for row in table]
+        mean = np.mean(ratios)
+        print(f'mean ratio: {mean}')
+        maximum = np.max(ratios)
+        print(f'max ratio: {maximum}')
+        std = np.std(ratios)
+        print(f'std ratio: {std}')
+
     delta_header_names = get_delta_header_names(n_cvs_files)
     def get_max_delta(row: Dict) -> float:
         return max((abs(row[key]) for key in delta_header_names if isinstance(row[key], float)),
@@ -486,6 +505,15 @@ def compare_sum_transformation_time(data: List[Dict[ModelInfo, ModelData]]):
                 ratio = compile_times[csv_idx] / compile_times[0]
             row[f'time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
+
+    if n_cvs_files == 2:
+        ratios = [abs(1 - row[f'time #2/#1']) for row in table]
+        mean = np.mean(ratios)
+        print(f'mean ratio: {mean}')
+        maximum = np.max(ratios)
+        print(f'max ratio: {maximum}')
+        std = np.std(ratios)
+        print(f'std ratio: {std}')
 
     delta_header_names = get_delta_header_names(n_cvs_files)
     def get_max_delta(row: Dict) -> float:
