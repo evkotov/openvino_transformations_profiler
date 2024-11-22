@@ -7,6 +7,8 @@ import csv
 from dataclasses import dataclass, field
 from pathlib import Path
 import sys
+from traceback import StackSummary
+
 from tabulate import tabulate
 from typing import List, Dict, Tuple, Iterator, Set, Optional
 
@@ -392,7 +394,62 @@ def full_join_by_model_info(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[
         yield model_info, items
 
 
-def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
+class SummaryStatsCollector:
+    SummaryStats = namedtuple('SummaryStats', ['delta_median', 'delta_mean', 'delta_std', 'delta_max_abs',
+                                               'ratio_median', 'ratio_mean', 'ratio_std', 'ratio_max_abs'])
+    RatioValue = namedtuple('RatioValue', ['value1', 'value2'])
+    def __init__(self):
+        self.__array: List[SummaryStatsCollector.RatioValue] = []
+
+    def add(self, value1: float, value2: float):
+        if not isinstance(value1, float) or not isinstance(value2, float):
+            return
+        self.__array.append(SummaryStatsCollector.RatioValue(value1, value2))
+
+    def clear(self):
+        self.__array.clear()
+
+    def print_summary_stats(self, time_unit: str):
+        stats = self.get_stats()
+        header = ['value', 'median', 'mean', 'std', 'max abs']
+        rows = [{'value': f'delta ({time_unit})',
+                 'median': f'{stats.delta_median:.2f}',
+                 'mean': f'{stats.delta_mean:.2f}',
+                 'std': f'{stats.delta_std:.2f}',
+                 'max abs': f'{stats.delta_max_abs:.2f}',
+                 }, {'value': 'ratio (%)',
+                     'median': f'{stats.ratio_median:.2f}',
+                     'mean': f'{stats.ratio_mean:.2f}',
+                     'std': f'{stats.ratio_std:.2f}',
+                     'max abs': f'{stats.ratio_max_abs:.2f}'}]
+        ordered_rows_str = [{key: str(row[key]) for key in header} for row in rows]
+        print(tabulate(ordered_rows_str, headers="keys"))
+
+    @staticmethod
+    def get_stat_values(values: np.array):
+        median = np.median(values)
+        mean = np.mean(values)
+        std = np.std(values)
+        maximum = max(values, key=abs)
+        return median, mean, std, maximum
+
+    def get_stats(self) -> SummaryStats:
+        values1 = np.array([item.value1 for item in self.__array])
+        values2 = np.array([item.value2 for item in self.__array])
+        ratios = (values2 / values1 - 1.0) * 100.0
+        deltas = values2 - values1
+        delta_median, delta_mean, delta_std, delta_max = SummaryStatsCollector.get_stat_values(deltas)
+        ratio_median, ratio_mean, ratio_std, ratio_max = SummaryStatsCollector.get_stat_values(ratios)
+        return SummaryStatsCollector.SummaryStats(delta_median, delta_mean, delta_std, delta_max,
+                                                  ratio_median, ratio_mean, ratio_std, ratio_max)
+
+    def get_scatter_delta_data(self) -> List[Tuple[float, float]]:
+        pass # TODO
+        #return [(item.ratio, max(item.value1, item.value2)) for item in self.__array]
+
+
+def compare_compile_time(data: List[Dict[ModelInfo, ModelData]],
+                         stats_collector: Optional[SummaryStatsCollector]):
     if len(data) == 0:
         return [], []
 
@@ -441,14 +498,12 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
             row[f'compile time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
 
-    if n_cvs_files == 2:
-        ratios = [abs(1 - row[f'compile time #2/#1']) for row in table]
-        mean = np.mean(ratios)
-        print(f'mean ratio: {mean}')
-        maximum = np.max(ratios)
-        print(f'max ratio: {maximum}')
-        std = np.std(ratios)
-        print(f'std ratio: {std}')
+    if stats_collector is not None:
+        for row in table:
+            value1 = row[f'compile time #1 (secs)']
+            value2 = row[f'compile time #2 (secs)']
+            if isinstance(value1, float) and isinstance(value2, float):
+                stats_collector.add(value1, value2)
 
     delta_header_names = get_delta_header_names(n_cvs_files)
     def get_max_delta(row: Dict) -> float:
@@ -457,7 +512,8 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
     return header, sort_table(table, get_max_delta)
 
 
-def compare_sum_transformation_time(data: List[Dict[ModelInfo, ModelData]]):
+def compare_sum_transformation_time(data: List[Dict[ModelInfo, ModelData]],
+                                    stats_collector: Optional[SummaryStatsCollector]):
     if len(data) == 0:
         return [], []
 
@@ -506,14 +562,12 @@ def compare_sum_transformation_time(data: List[Dict[ModelInfo, ModelData]]):
             row[f'time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
 
-    if n_cvs_files == 2:
-        ratios = [abs(1 - row[f'time #2/#1']) for row in table]
-        mean = np.mean(ratios)
-        print(f'mean ratio: {mean}')
-        maximum = np.max(ratios)
-        print(f'max ratio: {maximum}')
-        std = np.std(ratios)
-        print(f'std ratio: {std}')
+    if stats_collector is not None:
+        for row in table:
+            value1 = row[f'time #1 (ms)']
+            value2 = row[f'time #2 (ms)']
+            if isinstance(value1, float) and isinstance(value2, float):
+                stats_collector.add(value1, value2)
 
     delta_header_names = get_delta_header_names(n_cvs_files)
     def get_max_delta(row: Dict) -> float:
@@ -580,7 +634,8 @@ def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
 
 
 def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
-                      unit_type: str):
+                      unit_type: str,
+                      stats_collector: Optional[SummaryStatsCollector]):
     def get_duration(aggregated_data_item: Dict[str, Total], name: str) -> float:
         duration = 0.0
         if name in aggregated_data_item:
@@ -618,10 +673,10 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
     table = []
 
     aggregated_data = [get_sum_duration(csv_data, unit_type) for csv_data in data]
-    all_transformations = set(ts_name for aggregated_data_item in aggregated_data
+    transformation_names = set(ts_name for aggregated_data_item in aggregated_data
                               for ts_name in aggregated_data_item)
 
-    for name in all_transformations:
+    for name in transformation_names:
         row = {'name' : name}
         durations = []
         counters = []
@@ -646,12 +701,44 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
             row[f'count #{csv_idx + 1} - #1'] = delta
         table.append(row)
 
+    if stats_collector is not None:
+        for row in table:
+            value1 = row[f'duration #1 (ms)']
+            value2 = row[f'duration #2 (ms)']
+            if isinstance(value1, float) and isinstance(value2, float):
+                stats_collector.add(value1, value2)
+
     header = create_header(n_csv_files)
 
     delta_header_names = get_delta_header_names(n_csv_files)
     def get_max_delta(row: Dict) -> float:
         return max((abs(row[key]) for key in delta_header_names))
     return header, sort_table(table, get_max_delta)
+
+
+def create_ratio_stats_table(data: Dict[ModelInfo, SummaryStatsCollector.SummaryStats]):
+    column_names = column_names = ['framework',
+                                   'name',
+                                   'precision',
+                                   'config', 'delta median', 'delta mean', 'delta std', 'delta max',
+                                   'ratio median', 'ratio mean', 'ratio std', 'ratio max']
+    table = []
+    for model_info, summary_stats in data.items():
+        row = {'framework': model_info.framework, 'name': model_info.name, 'precision': model_info.precision,
+               'config': model_info.config,
+               'delta median': summary_stats.delta_median,
+               'delta mean': summary_stats.delta_mean,
+               'delta std': summary_stats.delta_std,
+               'delta max': summary_stats.delta_max_abs,
+               'ratio median': summary_stats.ratio_median,
+               'ratio mean': summary_stats.ratio_mean,
+               'ratio std': summary_stats.ratio_std,
+               'ratio max': summary_stats.ratio_max_abs
+                }
+        table.append(row)
+    def get_delta_max(row: Dict) -> float:
+        return row['delta max']
+    return column_names, sort_table(table, get_delta_max)
 
 
 def check_csv_data(data: List[Dict[ModelInfo, ModelData]]) -> None:
@@ -862,8 +949,9 @@ class DataProcessor(ABC):
 
 
 class CompareCompileTime(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory):
+    def __init__(self, output_factory: SingleOutputFactory, summary_stats_collector: Optional[SummaryStatsCollector]):
         super().__init__(output_factory)
+        self.__summary_stats_collector = summary_stats_collector
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing compile time ...')
@@ -871,15 +959,18 @@ class CompareCompileTime(DataProcessor):
         if not csv_data:
             print('no common models to compare compilation time ...')
             return
-        header, table = compare_compile_time(csv_data)
+        header, table = compare_compile_time(csv_data, self.__summary_stats_collector)
+        if self.__summary_stats_collector:
+            self.__summary_stats_collector.print_summary_stats('sec')
         with self.output_factory.create(header) as output:
             output.write_header()
             output.write(table)
 
 
 class CompareSumTransformationTime(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory):
+    def __init__(self, output_factory: SingleOutputFactory, summary_stats_collector: Optional[SummaryStatsCollector]):
         super().__init__(output_factory)
+        self.__summary_stats_collector = summary_stats_collector
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing sum transformation time ...')
@@ -887,7 +978,9 @@ class CompareSumTransformationTime(DataProcessor):
         if not csv_data:
             print('no common models to compare compilation time ...')
             return
-        header, table = compare_sum_transformation_time(csv_data)
+        header, table = compare_sum_transformation_time(csv_data, self.__summary_stats_collector)
+        if self.__summary_stats_collector:
+            self.__summary_stats_collector.print_summary_stats('ms')
         with self.output_factory.create(header) as output:
             output.write_header()
             output.write(table)
@@ -921,30 +1014,46 @@ class GenerateLongestUnitsPerModel(DataProcessor):
 
 
 class CompareSumUnitsOverall(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory, unit_type: str):
+    def __init__(self, output_factory: SingleOutputFactory, unit_type: str,
+                 summary_statistics_collector: Optional[SummaryStatsCollector]):
         super().__init__(output_factory)
         self.unit_type = unit_type
+        self.__summary_statistics_collector = summary_statistics_collector
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} overall data ...')
         csv_data_common_models = filter_common_models(csv_data)
-        header, table = compare_sum_units(csv_data_common_models, self.unit_type)
+        header, table = compare_sum_units(csv_data_common_models, self.unit_type, self.__summary_statistics_collector)
+        if self.__summary_statistics_collector:
+            self.__summary_statistics_collector.print_summary_stats('ms')
         with self.output_factory.create(header) as output:
             output.write_header()
             output.write(table)
 
 
 class CompareSumUnitsPerModel(DataProcessor):
-    def __init__(self, output_factory: MultiOutputFactory, unit_type: str):
+    def __init__(self, output_factory: MultiOutputFactory,
+                 summary_output_factory: SingleOutputFactory,
+                 unit_type: str, summary_statistics_collector: Optional[SummaryStatsCollector]):
         super().__init__(output_factory)
         self.unit_type = unit_type
+        self.__summary_output_factory = summary_output_factory
+        self.__summary_statistics_collector = summary_statistics_collector
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} per model data ...')
         csv_data_common_models = filter_common_models(csv_data)
+        ratio_stats_overall = {}
         for model_info in get_all_models(csv_data_common_models):
-            header, table = compare_sum_units(filter_by_models(csv_data, [model_info]), self.unit_type)
+            self.__summary_statistics_collector.clear()
+            header, table = compare_sum_units(filter_by_models(csv_data, [model_info]), self.unit_type, self.__summary_statistics_collector)
+            ratio_stats_overall[model_info] = self.__summary_statistics_collector.get_stats()
             with self.output_factory.create(header, model_info) as output:
+                output.write_header()
+                output.write(table)
+        if ratio_stats_overall:
+            header, table = create_ratio_stats_table(ratio_stats_overall)
+            with self.__summary_output_factory.create(header) as output:
                 output.write_header()
                 output.write(table)
 
@@ -965,6 +1074,8 @@ class Config:
     model_name = None
     limit_output = None
     inputs: List[str] = field(default_factory=list)
+    summary_statistics: bool = False
+    summary_ratio_histogram: bool = False
 
 
 def parse_args() -> Config:
@@ -1125,7 +1236,11 @@ Output maximum number of rows
 For example, to output only first 15 rows in table
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_managers_overall --limit_output 15
 ''')
-
+    args_parser.add_argument('--summary_statistics', action='store_true',
+                             help=f'''
+Output summary statistics if compare 2 input CSV files
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --summary_statistics
+''')
     args = args_parser.parse_args()
 
     config = Config()
@@ -1155,6 +1270,10 @@ For example, to output only first 15 rows in table
     config.compare_managers_per_model = args.compare_managers_per_model
     config.model_name = args.model_name
     config.limit_output = args.limit_output
+    if args.summary_statistics:
+        config.summary_statistics = True
+    else:
+        config.summary_statistics = False
 
     return config
 
@@ -1164,10 +1283,24 @@ def create_single_output_factory(output_type: str, path: str, description: str, 
         return CSVSingleFileOutputFactory(path, limit_output)
     return ConsoleTableSingleFileOutputFactory(description, limit_output)
 
+
 def create_multi_output_factory(output_type: str, prefix: str, description: str, limit_output):
     if output_type == 'csv':
         return CSVMultiFileOutputFactory(prefix, limit_output)
     return ConsoleTableMultiOutputFactory(description, limit_output)
+
+
+def create_summary_output_factory(output_type: str, prefix: str, description: str):
+    if output_type == 'csv':
+        path = f'{prefix}_summary.csv'
+        return CSVSingleFileOutputFactory(path, None)
+    return ConsoleTableSingleFileOutputFactory(description, None)
+
+
+def create_summary_stats_collector(config: Config):
+    if config.summary_statistics:
+        return SummaryStatsCollector()
+    return None
 
 
 def main(config: Config) -> None:
@@ -1177,13 +1310,15 @@ def main(config: Config) -> None:
                                                       config.compare_compile_time,
                                                       'compilation time',
                                                       config.limit_output)
-        data_processors.append(CompareCompileTime(output_factory))
+        summary_stats_collector = create_summary_stats_collector(config)
+        data_processors.append(CompareCompileTime(output_factory, summary_stats_collector))
     if config.compare_sum_transformation_time:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.compare_sum_transformation_time,
                                                       'sum transformation time',
                                                       config.limit_output)
-        data_processors.append(CompareSumTransformationTime(output_factory))
+        summary_stats_collector = create_summary_stats_collector(config)
+        data_processors.append(CompareSumTransformationTime(output_factory, summary_stats_collector))
     if config.transformations_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.transformations_overall,
@@ -1213,25 +1348,40 @@ def main(config: Config) -> None:
                                                       config.compare_transformations_overall,
                                                       'compare transformations overall',
                                                       config.limit_output)
-        data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='transformation'))
+        summary_stats_collector = create_summary_stats_collector(config)
+        data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='transformation',
+                                                      summary_statistics_collector=summary_stats_collector))
     if config.compare_managers_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.compare_managers_overall,
                                                       'compare managers overall',
                                                       config.limit_output)
-        data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='manager'))
+        summary_stats_collector = create_summary_stats_collector(config)
+        data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='manager',
+                                                      summary_statistics_collector=summary_stats_collector))
     if config.compare_transformations_per_model:
         output_factory = create_multi_output_factory(config.output_type,
                                                      config.compare_transformations_per_model,
                                                      'compare transformations per model',
                                                      config.limit_output)
-        data_processors.append(CompareSumUnitsPerModel(output_factory, unit_type='transformation'))
+        summary_output_factory = create_summary_output_factory(config.output_type,
+                                                               config.compare_transformations_per_model,
+                                                               'compare transformations per model')
+        summary_stats_collector = create_summary_stats_collector(config)
+        data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory,
+                                                       unit_type='transformation',
+                                                       summary_statistics_collector=summary_stats_collector))
     if config.compare_managers_per_model:
         output_factory = create_multi_output_factory(config.output_type,
                                                      config.compare_managers_per_model,
                                                      'compare managers per model',
                                                      config.limit_output)
-        data_processors.append(CompareSumUnitsPerModel(output_factory, unit_type='manager'))
+        summary_output_factory = create_summary_output_factory(config.output_type,
+                                                               config.compare_transformations_per_model,
+                                                               'compare managers per model')
+        summary_stats_collector = create_summary_stats_collector(config)
+        data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory, unit_type='manager',
+                                                       summary_statistics_collector=summary_stats_collector))
 
 
     if not data_processors:

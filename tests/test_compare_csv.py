@@ -1,6 +1,8 @@
 import unittest
 import compare_csv
 import os
+from collections import namedtuple
+
 
 class TestUnit(unittest.TestCase):
     def test_initializes_correctly(self):
@@ -192,7 +194,7 @@ class TestCSVHeader(unittest.TestCase):
 
 class TestReadCSV(unittest.TestCase):
     def tearDown(self):
-        files_to_remove = ['test_optional.csv', 'test_no_optional.csv', 'test_device.csv', 'test_no_device.csv', 'test_invalid.csv']
+        files_to_remove = ['test_optional.csv', 'test_no_optional.csv', 'test_device.csv', 'test_no_device.csv', 'test_invalid.csv', 'missing_config.csv']
         for file in files_to_remove:
             if os.path.exists(file):
                 os.remove(file)
@@ -329,6 +331,181 @@ class TestGetCommonModels(unittest.TestCase):
         ]
         result = compare_csv.get_common_models(data)
         self.assertEqual(result, [])
+
+
+class TestCreateRatioStatsTable(unittest.TestCase):
+    def create_ratio_stats_table(self, data):
+        column_names = ['framework', 'name', 'precision', 'config', 'median', 'mean', 'std', 'max']
+        table = []
+        for model_info, ratio_stats in data.items():
+            row = {'framework': model_info.framework, 'name': model_info.name, 'precision': model_info.precision,
+                   'config': model_info.config, 'median': ratio_stats.median, 'mean': ratio_stats.mean,
+                   'std': ratio_stats.std, 'max': ratio_stats.max}
+            table.append(row)
+        def get_ratio_max(row):
+            return row['max']
+        return column_names, sorted(table, key=get_ratio_max, reverse=True)
+
+    def test_create_ratio_stats_table_with_valid_data(self):
+        ModelInfo = namedtuple('ModelInfo', ['framework', 'name', 'precision', 'config'])
+        RatioStats = namedtuple('RatioStats', ['median', 'mean', 'std', 'max'])
+        data = {
+            ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1'): RatioStats(10, 20, 5, 30),
+            ModelInfo('PyTorch', 'ModelB', 'FP16', 'config2'): RatioStats(15, 25, 10, 35)
+        }
+        column_names, table = self.create_ratio_stats_table(data)
+        self.assertEqual(column_names, ['framework', 'name', 'precision', 'config', 'median', 'mean', 'std', 'max'])
+        self.assertEqual(len(table), 2)
+        self.assertEqual(table[0]['framework'], 'PyTorch')
+        self.assertEqual(table[1]['framework'], 'TensorFlow')
+
+    def test_create_ratio_stats_table_with_empty_data(self):
+        data = {}
+        column_names, table = self.create_ratio_stats_table(data)
+        self.assertEqual(column_names, ['framework', 'name', 'precision', 'config', 'median', 'mean', 'std', 'max'])
+        self.assertEqual(len(table), 0)
+
+    def test_create_ratio_stats_table_with_single_entry(self):
+        ModelInfo = namedtuple('ModelInfo', ['framework', 'name', 'precision', 'config'])
+        RatioStats = namedtuple('RatioStats', ['median', 'mean', 'std', 'max'])
+        data = {
+            ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1'): RatioStats(10, 20, 5, 30)
+        }
+        column_names, table = self.create_ratio_stats_table(data)
+        self.assertEqual(column_names, ['framework', 'name', 'precision', 'config', 'median', 'mean', 'std', 'max'])
+        self.assertEqual(len(table), 1)
+        self.assertEqual(table[0]['framework'], 'TensorFlow')
+        self.assertEqual(table[0]['name'], 'ModelA')
+        self.assertEqual(table[0]['precision'], 'FP32')
+        self.assertEqual(table[0]['config'], 'config1')
+        self.assertEqual(table[0]['median'], 10)
+        self.assertEqual(table[0]['mean'], 20)
+        self.assertEqual(table[0]['std'], 5)
+        self.assertEqual(table[0]['max'], 30)
+
+
+class TestRemoveInvalidItems(unittest.TestCase):
+
+    def test_remove_invalid_items_with_valid_data(self):
+        ModelInfo = namedtuple('ModelInfo', ['framework', 'name', 'precision', 'config'])
+        data = {
+            ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1'): compare_csv.ModelData(),
+            ModelInfo('PyTorch', 'ModelB', 'FP16', 'config2'): compare_csv.ModelData()
+        }
+        for model_data in data.values():
+            model_data.check = lambda: True
+        valid_data = compare_csv.remove_invalid_items(data)
+        self.assertEqual(len(valid_data), 2)
+
+    def test_remove_invalid_items_with_invalid_data(self):
+        ModelInfo = namedtuple('ModelInfo', ['framework', 'name', 'precision', 'config'])
+        data = {
+            ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1'): compare_csv.ModelData(),
+            ModelInfo('PyTorch', 'ModelB', 'FP16', 'config2'): compare_csv.ModelData()
+        }
+        data[ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1')].check = lambda: True
+        data[ModelInfo('PyTorch', 'ModelB', 'FP16', 'config2')].check = lambda: (_ for _ in ()).throw(AssertionError)
+        valid_data = compare_csv.remove_invalid_items(data)
+        self.assertEqual(len(valid_data), 1)
+        self.assertIn(ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1'), valid_data)
+
+    def test_remove_invalid_items_with_empty_data(self):
+        data = {}
+        valid_data = compare_csv.remove_invalid_items(data)
+        self.assertEqual(len(valid_data), 0)
+
+
+class TestMakeModelFileName(unittest.TestCase):
+
+    def test_make_model_file_name_with_config(self):
+        model_info = compare_csv.ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1')
+        result = compare_csv.make_model_file_name(model_info, 'prefix')
+        self.assertEqual(result, 'prefix_TensorFlow_ModelA_FP32_config1.csv')
+
+    def test_make_model_file_name_without_config(self):
+        model_info = compare_csv.ModelInfo('TensorFlow', 'ModelA', 'FP32', '')
+        result = compare_csv.make_model_file_name(model_info, 'prefix')
+        self.assertEqual(result, 'prefix_TensorFlow_ModelA_FP32.csv')
+
+    def test_make_model_file_name_with_special_characters(self):
+        model_info = compare_csv.ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config@1')
+        result = compare_csv.make_model_file_name(model_info, 'prefix')
+        self.assertEqual(result, 'prefix_TensorFlow_ModelA_FP32_config@1.csv')
+
+    def test_make_model_file_name_with_empty_prefix(self):
+        model_info = compare_csv.ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1')
+        result = compare_csv.make_model_file_name(model_info, '')
+        self.assertEqual(result, '_TensorFlow_ModelA_FP32_config1.csv')
+
+
+class TestMakeModelConsoleDescription(unittest.TestCase):
+
+    def test_make_model_console_description_with_config(self):
+        model_info = compare_csv.ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1')
+        result = compare_csv.make_model_console_description(model_info)
+        self.assertEqual(result, 'TensorFlow ModelA FP32 config1')
+
+    def test_make_model_console_description_without_config(self):
+        model_info = compare_csv.ModelInfo('TensorFlow', 'ModelA', 'FP32', '')
+        result = compare_csv.make_model_console_description(model_info)
+        self.assertEqual(result, 'TensorFlow ModelA FP32')
+
+    def test_make_model_console_description_with_special_characters(self):
+        model_info = compare_csv.ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config@1')
+        result = compare_csv.make_model_console_description(model_info)
+        self.assertEqual(result, 'TensorFlow ModelA FP32 config@1')
+
+    def test_make_model_console_description_with_empty_fields(self):
+        model_info = compare_csv.ModelInfo('', '', '', '')
+        result = compare_csv.make_model_console_description(model_info)
+        self.assertEqual(result, '  ')
+
+
+class TestCSVOutput(unittest.TestCase):
+
+    def tearDown(self):
+        if os.path.exists('test.csv'):
+            os.remove('test.csv')
+
+    def test_write_header_writes_correct_header(self):
+        output = compare_csv.CSVOutput('test.csv', ['col1', 'col2'], None)
+        with output:
+            output.write_header()
+        with open('test.csv', 'r') as f:
+            header = f.readline().strip()
+        self.assertEqual(header, 'col1;col2')
+
+    def test_write_writes_rows_correctly(self):
+        output = compare_csv.CSVOutput('test.csv', ['col1', 'col2'], None)
+        rows = [{'col1': 'val1', 'col2': 'val2'}, {'col1': 'val3', 'col2': 'val4'}]
+        with output:
+            output.write_header()
+            output.write(rows)
+        with open('test.csv', 'r') as f:
+            lines = f.readlines()
+        self.assertEqual(lines[1].strip(), 'val1;val2')
+        self.assertEqual(lines[2].strip(), 'val3;val4')
+
+    def test_write_respects_limit_output(self):
+        output = compare_csv.CSVOutput('test.csv', ['col1', 'col2'], 1)
+        rows = [{'col1': 'val1', 'col2': 'val2'}, {'col1': 'val3', 'col2': 'val4'}]
+        with output:
+            output.write_header()
+            output.write(rows)
+        with open('test.csv', 'r') as f:
+            lines = f.readlines()
+        self.assertEqual(len(lines), 2)  # header + 1 row
+
+    def test_enter_opens_file(self):
+        output = compare_csv.CSVOutput('test.csv', ['col1', 'col2'], None)
+        with output:
+            self.assertIsNotNone(output.file)
+
+    def test_exit_closes_file(self):
+        output = compare_csv.CSVOutput('test.csv', ['col1', 'col2'], None)
+        with output:
+            pass
+        self.assertTrue(output.file.closed)
 
 
 if __name__ == "__main__":
