@@ -89,10 +89,12 @@ def get_all_models(data: List[Dict[ModelInfo, ModelData]]) -> Set[ModelInfo]:
 
 
 def make_model_file_name(prefix: str, model_info: ModelInfo, extension: str) -> str:
-    name = [prefix,
-            model_info.framework,
-            model_info.name,
-            model_info.precision]
+    name = []
+    if prefix:
+        name = [prefix]
+    name.extend([model_info.framework,
+                 model_info.name,
+                 model_info.precision])
     if model_info.config:
         name.append(model_info.config)
     name = '_'.join(name)
