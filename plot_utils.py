@@ -140,6 +140,8 @@ class Hist:
 
 
 class ScatterPlot:
+    HLine = namedtuple('HLine', ['y_value', 'label'])
+    HFill = namedtuple('HFill', ['y_min', 'y_max', 'label'])
     def __init__(self, title: str, x_label: str, y_label: str):
         self.__title = title
         self.__x_label = x_label
@@ -147,19 +149,46 @@ class ScatterPlot:
         self.__x_values: List[float] = []
         self.__y_values: List[float] = []
         self.__plot_size = (10, 8)
+        self.__h_line: Optional[ScatterPlot.HLine] = None
+        self.__h_fill: Optional[ScatterPlot.HFill] = None
 
     def set_values(self, x_values: List[float], y_values: List[float]):
         self.__x_values = x_values
         self.__y_values = y_values
 
+    def add_horizontal_line(self, y_value: float, label: str):
+        self.__h_line = ScatterPlot.HLine(y_value, label)
+
+    def add_horizontal_fill(self, y_min: float, y_max: float, label: str):
+        self.__h_fill = ScatterPlot.HFill(y_min, y_max, label)
+
     def plot(self, path: str):
         plt.figure(figsize=self.__plot_size)
+        assert len(self.__x_values) == len(self.__y_values)
         plt.scatter(self.__x_values, self.__y_values)
 
         # Add titles and labels
         plt.title(self.__title)
         plt.xlabel(self.__x_label)
         plt.ylabel(self.__y_label)
+
+        need_legend = False
+        if self.__h_line:
+            plt.axhline(y=self.__h_line.y_value, color='b', linestyle='-', label=self.__h_line.label)
+            need_legend = True
+        if self.__h_fill:
+            plt.fill_between(
+                x=np.linspace(min(self.__x_values), max(self.__x_values), 100),  # Ensure the stripe spans the x-range
+                y1=self.__h_fill.y_min,
+                y2=self.__h_fill.y_max,
+                color='blue',
+                alpha=0.2,
+                label=self.__h_fill.label
+            )
+            need_legend = True
+
+        if need_legend:
+            plt.legend()
 
         plt.savefig(path)
         # Close the plot so it doesn't show up
@@ -172,7 +201,3 @@ def gen_hist(values, title: str, x_label: str, y_label: str, path: str):
     hist.set_values(values)
     hist.plot(path)
 
-def gen_scatter(x_values, y_values, title: str, x_label: str, y_label: str, path: str):
-    scatter = ScatterPlot(title, x_label, y_label)
-    scatter.set_values(x_values, y_values)
-    scatter.plot(path)

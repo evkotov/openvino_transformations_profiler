@@ -112,35 +112,71 @@ def make_model_console_description(model_info: ModelInfo) -> str:
     return ' '.join(name)
 
 
+def find_iqr_outlier_indexes(values) -> Set[int]:
+    q1 = np.percentile(values, 25)
+    q3 = np.percentile(values, 75)
+    iqr = q3 - q1
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+    indexes = (i for i, x in enumerate(values) if x < lower_bound or x > upper_bound)
+    return set(indexes)
+
+
 class PlotOutput:
-    def __init__(self, path_prefix, title_prefix: str):
+    def __init__(self, path_prefix, title_prefix: str, n_segments: int):
         self.path_prefix = path_prefix
         self.title_prefix = title_prefix
-
-    def plot_into_file(self, values: ComparisonValues, prefix: str):
-        delta_hist_path = prefix + '_delta_hist.png'
-        deltas = values.get_differences()
-        title = self.title_prefix + ' value#2 - value#1'
-        plot_utils.gen_hist(deltas, title, f'value #2 - value #1, {values.unit}', 'number of items', delta_hist_path)
-
-        ratio_hist_path = prefix + '_ratio_hist.png'
-        ratios = values.get_ratios()
-        title = self.title_prefix + ' value#2/value#1'
-        plot_utils.gen_hist(ratios, title, 'value #2/value #1 - 1, %', 'number of items', ratio_hist_path)
-
-        scatter_path = prefix + '_scatter.png'
-        max_values = values.get_max_values()
-        title = self.title_prefix + ' value#2/value#1'
-        plot_utils.gen_scatter(max_values, ratios, title, f'max (value #1, value #2), {values.unit}',
-                           'value #2/value #1 - 1, %', scatter_path)
+        self.n_segments = n_segments
 
     def plot_for_model(self, model_info: ModelInfo, values: ComparisonValues):
         prefix = make_model_file_name(self.path_prefix, model_info, '')
         self.plot_into_file(values, prefix)
 
+    def plot_into_file(self, values: ComparisonValues, prefix: str):
+        ratios = values.get_ratios()
+        max_values = values.get_max_values()
+        assert len(ratios) == len(max_values)
+
+        ratio_outlier_indexes = find_iqr_outlier_indexes(ratios)
+        log_numbers = np.log(max_values)
+        min_log = np.min(log_numbers)
+        max_log = np.max(log_numbers)
+        bins = np.linspace(min_log, max_log, self.n_segments  + 1)
+        indices = np.digitize(log_numbers, bins)
+
+        for i in range(1, self.n_segments  + 1):
+            x_part = []
+            y_part = []
+            n_outliers = 0
+            for j in range(len(max_values)):
+                if indices[j] != i:
+                    continue
+                if j in ratio_outlier_indexes:
+                    n_outliers += 1
+                    continue
+                x_part.append(max_values[j])
+                y_part.append(ratios[j])
+
+            if not x_part:
+                continue
+
+            y_values = np.array(y_part)
+            y_median = float(np.median(y_values))
+            mad_median = np.median(np.abs(y_values - y_median))
+
+            outliers_percent = n_outliers / len(max_values) * 100.0
+            title = f'{self.title_prefix} ratio part {i} without outliers ({outliers_percent:.2f} %)'
+            scatter_path = f'{prefix}_scatter_part{i}.png'
+
+            y_label = f'ratio (value #2/value #1 - 1), %'
+            x_label = f'max (value #1, value #2), {values.unit}'
+            scatter = plot_utils.ScatterPlot(title, x_label, y_label)
+            scatter.set_values(x_part, y_part)
+            scatter.add_horizontal_line(y_median, f'median {y_median:.2f} %')
+            scatter.plot(scatter_path)
+
     def plot(self, values: ComparisonValues):
-        prefix = self.path_prefix
-        self.plot_into_file(values, prefix)
+        self.plot_into_file(values, self.path_prefix)
 
 
 class Output(ABC):
@@ -443,12 +479,12 @@ class CompareSumUnitsPerModel(DataProcessor):
             header, table = create_comparison_summary_table(comparison_values_overall)
             with self.__summary_output_factory.create_table(header) as output:
                 output.write(table)
-        if self.__plot_output:
-            combined_comparison_values = ComparisonValues(self.unit_type)
+        if self.__plot_output and comparison_values_overall:
+            unit = next(iter(comparison_values_overall.values())).unit
+            combined_comparison_values = ComparisonValues(unit)
             for values in comparison_values_overall.values():
                 combined_comparison_values.values1.extend(values.values1)
                 combined_comparison_values.values2.extend(values.values2)
-            combined_comparison_values = combined_comparison_values.filter_values_by_min(float(1_000))
             self.__plot_output.plot(combined_comparison_values)
 
 
@@ -472,6 +508,7 @@ class Config:
     summary_ratio_histogram: bool = False
     plots: bool = False
     no_csv: bool = False
+    n_plot_segments: int = 1
 
 
 def parse_args() -> Config:
@@ -647,6 +684,11 @@ Output histograms and scatter plots if compare 2 input CSV files
 Don't generate CSV output files. Is useful with --plots option
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --plots --no_csv
 ''')
+    args_parser.add_argument('--n_plot_segments', type=int, default=1,
+                             help=f'''
+Number of plot segments. Is useful with --plots option
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --plots --no_csv --n_plot_segments 3
+''')
     args = args_parser.parse_args()
     if not args.input:
         print('specify input CSV files separated by comma')
@@ -675,6 +717,7 @@ Don't generate CSV output files. Is useful with --plots option
     config.compare_managers_per_model = args.compare_managers_per_model
     config.model_name = args.model_name
     config.limit_output = args.limit_output
+    config.n_plot_segments = args.n_plot_segments
     if args.no_csv:
         config.no_csv = True
     if args.summary_statistics:
@@ -703,7 +746,7 @@ def create_multi_output_factory(config: Config, prefix: str, description: str):
 
 def create_summary_output_factory(output_type: str, prefix: str, description: str):
     if output_type == 'csv':
-        path = f'{prefix}_summary.csv'
+        path = f'{prefix}_summary'
         return CSVSingleFileOutputFactory(path, None)
     return ConsoleTableSingleFileOutputFactory(description, None)
 
@@ -720,7 +763,7 @@ def main(config: Config) -> None:
             if not path_prefix:
                 path_prefix = 'compilation'
             title_prefix = 'compilation time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix)
+            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareCompileTime(output_factory, config.summary_statistics,
                                                   plot_output_factory))
     if config.compare_sum_transformation_time:
@@ -733,7 +776,7 @@ def main(config: Config) -> None:
             if not path_prefix:
                 path_prefix = 'sum_ts'
             title_prefix = 'sum transformation time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix)
+            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareSumTransformationTime(output_factory, config.summary_statistics,
                                                             plot_output_factory))
     if config.transformations_overall:
@@ -766,7 +809,7 @@ def main(config: Config) -> None:
             if not path_prefix:
                 path_prefix = 'ts_overall'
             title_prefix = 'transformations overall time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix)
+            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='transformation',
                                                       summary_stats=config.summary_statistics,
                                                       plot_output=plot_output_factory))
@@ -780,7 +823,7 @@ def main(config: Config) -> None:
             if not path_prefix:
                 path_prefix = 'managers_overall'
             title_prefix = 'compare managers overall time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix)
+            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='manager',
                                                       summary_stats=config.summary_statistics,
                                                       plot_output=plot_output_factory))
@@ -788,8 +831,10 @@ def main(config: Config) -> None:
         output_factory = create_multi_output_factory(config,
                                                      config.compare_transformations_per_model,
                                                      'compare transformations per model')
-        summary_output_factory = create_summary_output_factory(config.output_type,
-                                                               config.compare_transformations_per_model,
+        summary_output_factory = None
+        if config.summary_statistics:
+            summary_output_factory = create_summary_output_factory(config.output_type,
+                                                                   config.compare_transformations_per_model,
                                                                'compare transformations per model')
         plot_output_factory = None
         if config.plots:
@@ -797,14 +842,16 @@ def main(config: Config) -> None:
             if not path_prefix:
                 path_prefix = 'compare_ts'
             title_prefix = 'compare transformations time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix)
+            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory,
                                                        unit_type='transformation', plot_output=plot_output_factory))
     if config.compare_managers_per_model:
         output_factory = create_multi_output_factory(config,
                                                      config.compare_managers_per_model,
                                                      'compare managers per model')
-        summary_output_factory = create_summary_output_factory(config.output_type,
+        summary_output_factory = None
+        if config.summary_statistics:
+            summary_output_factory = create_summary_output_factory(config.output_type,
                                                                config.compare_managers_per_model,
                                                                'compare managers per model')
         plot_output_factory = None
@@ -813,7 +860,7 @@ def main(config: Config) -> None:
             if not path_prefix:
                 path_prefix = 'compare_managers'
             title_prefix = 'compare managers time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix)
+            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory, unit_type='manager',
                                                        plot_output=plot_output_factory))
 

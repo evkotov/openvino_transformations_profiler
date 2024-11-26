@@ -253,12 +253,3 @@ class ComparisonValues:
         return SummaryStats(delta_median, delta_mean, delta_std, delta_max,
                             ratio_median, ratio_mean, ratio_std, ratio_max, self.unit)
 
-    def filter_values_by_min(self, min_value: float):
-        new_values = ComparisonValues(self.unit)
-        for i in range(len(self.values1)):
-            if self.values1[i] >= min_value and self.values2[i] >= min_value:
-                new_values.values1.append(self.values1[i])
-                new_values.values2.append(self.values2[i])
-        assert len(new_values.values1) == len(new_values.values2)
-        print(f'filtered values: {len(new_values.values1)}')
-        return new_values
