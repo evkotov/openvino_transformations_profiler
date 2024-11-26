@@ -422,22 +422,22 @@ class TestMakeModelFileName(unittest.TestCase):
 
     def test_make_model_file_name_with_config(self):
         model_info = common_structs.ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1')
-        result = compare_csv.make_model_file_name(model_info, 'prefix')
-        self.assertEqual(result, 'prefix_TensorFlow_ModelA_FP32_config1.csv')
+        result = compare_csv.make_model_file_name('prefix', model_info, '')
+        self.assertEqual(result, 'prefix_TensorFlow_ModelA_FP32_config1')
 
     def test_make_model_file_name_without_config(self):
         model_info = common_structs.ModelInfo('TensorFlow', 'ModelA', 'FP32', '')
-        result = compare_csv.make_model_file_name(model_info, 'prefix')
+        result = compare_csv.make_model_file_name('prefix', model_info, 'csv')
         self.assertEqual(result, 'prefix_TensorFlow_ModelA_FP32.csv')
 
     def test_make_model_file_name_with_special_characters(self):
         model_info = common_structs.ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config@1')
-        result = compare_csv.make_model_file_name(model_info, 'prefix')
+        result = compare_csv.make_model_file_name('prefix', model_info,  'csv')
         self.assertEqual(result, 'prefix_TensorFlow_ModelA_FP32_config@1.csv')
 
     def test_make_model_file_name_with_empty_prefix(self):
         model_info = common_structs.ModelInfo('TensorFlow', 'ModelA', 'FP32', 'config1')
-        result = compare_csv.make_model_file_name(model_info, '')
+        result = compare_csv.make_model_file_name('', model_info, 'csv')
         self.assertEqual(result, '_TensorFlow_ModelA_FP32_config1.csv')
 
 
