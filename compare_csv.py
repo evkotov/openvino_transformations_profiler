@@ -160,6 +160,20 @@ class Output(ABC):
         pass
 
 
+class NoOutput(Output):
+    def __init__(self):
+        super().__init__([])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def write(self, row: List[Dict[str, str]]):
+        pass
+
+
 class CSVOutput(Output):
     def __init__(self, path: str, header: List[str], limit_output):
         super().__init__(header)
@@ -218,6 +232,14 @@ class SingleOutputFactory(ABC):
         pass
 
 
+class SingleNoOutputFactory(SingleOutputFactory):
+    def __init__(self):
+        super().__init__()
+
+    def create_table(self, header: List[str]):
+        return NoOutput()
+
+
 class CSVSingleFileOutputFactory(SingleOutputFactory):
     def __init__(self, path_prefix: str, limit_output):
         super().__init__()
@@ -246,6 +268,14 @@ class MultiOutputFactory(ABC):
     @abstractmethod
     def create_table(self, header: List[str], model_info: ModelInfo):
         pass
+
+
+class MultiFileNoOutputFactory(MultiOutputFactory):
+    def __init__(self):
+        super().__init__()
+
+    def create_table(self, header: List[str], model_info: ModelInfo):
+        return NoOutput()
 
 
 class CSVMultiFileOutputFactory(MultiOutputFactory):
@@ -441,6 +471,7 @@ class Config:
     summary_statistics: bool = False
     summary_ratio_histogram: bool = False
     plots: bool = False
+    no_csv: bool = False
 
 
 def parse_args() -> Config:
@@ -611,6 +642,11 @@ Output summary statistics if compare 2 input CSV files
 Output histograms and scatter plots if compare 2 input CSV files
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --plots
 ''')
+    args_parser.add_argument('--no_csv', action='store_true',
+                             help=f'''
+Don't generate CSV output files. Is useful with --plots option
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --plots --no_csv
+''')
     args = args_parser.parse_args()
     if not args.input:
         print('specify input CSV files separated by comma')
@@ -639,28 +675,30 @@ Output histograms and scatter plots if compare 2 input CSV files
     config.compare_managers_per_model = args.compare_managers_per_model
     config.model_name = args.model_name
     config.limit_output = args.limit_output
+    if args.no_csv:
+        config.no_csv = True
     if args.summary_statistics:
         config.summary_statistics = True
-    else:
-        config.summary_statistics = False
     if args.plots:
         config.plots = True
-    else:
-        config.plots = False
 
     return config
 
 
-def create_single_output_factory(output_type: str, path_prefix: str, description: str, limit_output):
-    if output_type == 'csv':
-        return CSVSingleFileOutputFactory(path_prefix, limit_output)
-    return ConsoleTableSingleFileOutputFactory(description, limit_output)
+def create_single_output_factory(config: Config, path_prefix: str, description: str):
+    if config.no_csv:
+        return SingleNoOutputFactory()
+    if config.output_type == 'csv':
+        return CSVSingleFileOutputFactory(path_prefix, config.limit_output)
+    return ConsoleTableSingleFileOutputFactory(description, config.limit_output)
 
 
-def create_multi_output_factory(output_type: str, prefix: str, description: str, limit_output):
-    if output_type == 'csv':
-        return CSVMultiFileOutputFactory(prefix, limit_output)
-    return ConsoleTableMultiOutputFactory(description, limit_output)
+def create_multi_output_factory(config: Config, prefix: str, description: str):
+    if config.no_csv:
+        return MultiFileNoOutputFactory()
+    if config.output_type == 'csv':
+        return CSVMultiFileOutputFactory(prefix, config.limit_output)
+    return ConsoleTableMultiOutputFactory(description, config.limit_output)
 
 
 def create_summary_output_factory(output_type: str, prefix: str, description: str):
@@ -673,10 +711,9 @@ def create_summary_output_factory(output_type: str, prefix: str, description: st
 def main(config: Config) -> None:
     data_processors = []
     if config.compare_compile_time:
-        output_factory = create_single_output_factory(config.output_type,
+        output_factory = create_single_output_factory(config,
                                                       config.compare_compile_time,
-                                                      'compilation time',
-                                                      config.limit_output)
+                                                      'compilation time')
         plot_output_factory = None
         if config.plots:
             path_prefix = config.compare_compile_time
@@ -687,10 +724,9 @@ def main(config: Config) -> None:
         data_processors.append(CompareCompileTime(output_factory, config.summary_statistics,
                                                   plot_output_factory))
     if config.compare_sum_transformation_time:
-        output_factory = create_single_output_factory(config.output_type,
+        output_factory = create_single_output_factory(config,
                                                       config.compare_sum_transformation_time,
-                                                      'sum transformation time',
-                                                      config.limit_output)
+                                                      'sum transformation time')
         plot_output_factory = None
         if config.plots:
             path_prefix = config.compare_sum_transformation_time
@@ -701,34 +737,29 @@ def main(config: Config) -> None:
         data_processors.append(CompareSumTransformationTime(output_factory, config.summary_statistics,
                                                             plot_output_factory))
     if config.transformations_overall:
-        output_factory = create_single_output_factory(config.output_type,
+        output_factory = create_single_output_factory(config,
                                                       config.transformations_overall,
-                                                      'transformations overall',
-                                                      config.limit_output)
+                                                      'transformations overall')
         data_processors.append(GenerateLongestUnitsOverall(output_factory, unit_type='transformation'))
     if config.manager_overall:
-        output_factory = create_single_output_factory(config.output_type,
+        output_factory = create_single_output_factory(config,
                                                       config.manager_overall,
-                                                      'managers overall',
-                                                      config.limit_output)
+                                                      'managers overall')
         data_processors.append(GenerateLongestUnitsOverall(output_factory, unit_type='manager'))
     if config.transformations_per_model:
-        output_factory = create_multi_output_factory(config.output_type,
+        output_factory = create_multi_output_factory(config,
                                                      config.transformations_per_model,
-                                                     'transformations per model',
-                                                     config.limit_output)
+                                                     'transformations per model')
         data_processors.append(GenerateLongestUnitsPerModel(output_factory, unit_type='transformation'))
     if config.managers_per_model:
-        output_factory = create_multi_output_factory(config.output_type,
+        output_factory = create_multi_output_factory(config,
                                                      config.managers_per_model,
-                                                     'managers per model',
-                                                     config.limit_output)
+                                                     'managers per model')
         data_processors.append(GenerateLongestUnitsPerModel(output_factory, unit_type='manager'))
     if config.compare_transformations_overall:
-        output_factory = create_single_output_factory(config.output_type,
+        output_factory = create_single_output_factory(config,
                                                       config.compare_transformations_overall,
-                                                      'compare transformations overall',
-                                                      config.limit_output)
+                                                      'compare transformations overall')
         plot_output_factory = None
         if config.plots:
             path_prefix = config.compare_transformations_overall
@@ -740,10 +771,9 @@ def main(config: Config) -> None:
                                                       summary_stats=config.summary_statistics,
                                                       plot_output=plot_output_factory))
     if config.compare_managers_overall:
-        output_factory = create_single_output_factory(config.output_type,
+        output_factory = create_single_output_factory(config,
                                                       config.compare_managers_overall,
-                                                      'compare managers overall',
-                                                      config.limit_output)
+                                                      'compare managers overall')
         plot_output_factory = None
         if config.plots:
             path_prefix = config.compare_managers_overall
@@ -755,10 +785,9 @@ def main(config: Config) -> None:
                                                       summary_stats=config.summary_statistics,
                                                       plot_output=plot_output_factory))
     if config.compare_transformations_per_model:
-        output_factory = create_multi_output_factory(config.output_type,
+        output_factory = create_multi_output_factory(config,
                                                      config.compare_transformations_per_model,
-                                                     'compare transformations per model',
-                                                     config.limit_output)
+                                                     'compare transformations per model')
         summary_output_factory = create_summary_output_factory(config.output_type,
                                                                config.compare_transformations_per_model,
                                                                'compare transformations per model')
@@ -772,10 +801,9 @@ def main(config: Config) -> None:
         data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory,
                                                        unit_type='transformation', plot_output=plot_output_factory))
     if config.compare_managers_per_model:
-        output_factory = create_multi_output_factory(config.output_type,
+        output_factory = create_multi_output_factory(config,
                                                      config.compare_managers_per_model,
-                                                     'compare managers per model',
-                                                     config.limit_output)
+                                                     'compare managers per model')
         summary_output_factory = create_summary_output_factory(config.output_type,
                                                                config.compare_managers_per_model,
                                                                'compare managers per model')
