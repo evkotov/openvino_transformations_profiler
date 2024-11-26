@@ -361,7 +361,6 @@ class CompareCompileTime(DataProcessor):
         if self.__plot_output:
             self.__plot_output.plot(comparison_values)
         with self.output_factory.create_table(header) as output:
-            output.write_header()
             output.write(table)
 
 
