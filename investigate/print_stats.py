@@ -1,6 +1,7 @@
 import os
 import sys
-from compare_csv import ModelInfo, get_csv_data
+from parse_input import get_csv_data
+from common_structs import ModelInfo
 from typing import List
 
 

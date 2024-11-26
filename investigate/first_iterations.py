@@ -1,6 +1,8 @@
 import sys
 from typing import List, Dict, Tuple, Optional
-from compare_csv import ModelInfo, ModelData, Unit, get_csv_data, sort_table, full_join_by_model_info
+from table import sort_table, full_join_by_model_info
+from parse_input import get_csv_data
+from common_structs import Unit, ModelData, ModelInfo
 import csv
 import numpy as np
 from plot_utils import Plot, generate_x_ticks_cast_to_int

@@ -1,5 +1,7 @@
 from typing import List, Dict, Iterator, Tuple
-from compare_csv import ModelInfo, ModelData, full_join_by_model_info, get_items_by_type, Unit
+from compare_csv import get_items_by_type
+from table import full_join_by_model_info
+from common_structs import Unit, ModelData, ModelInfo
 from collections import namedtuple
 import numpy as np
 

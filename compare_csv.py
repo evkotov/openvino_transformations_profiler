@@ -5,331 +5,18 @@ import argparse
 from collections import namedtuple
 import csv
 from dataclasses import dataclass, field
-from pathlib import Path
 import sys
-from traceback import StackSummary
 
 from tabulate import tabulate
-from typing import List, Dict, Tuple, Iterator, Set, Optional
-
+from typing import List, Dict, Set, Optional
 
 import numpy as np
 
-
-CSVColumnNames = ('device',
-                  'model_path',
-                  'model_name',
-                  'model_framework',
-                  'model_precision',
-                  'config', # optional_model_attribute, weight_compression
-                  'iteration',
-                  'type',
-                  'transformation_name',
-                  'manager_name',
-                  'duration')
-
-
-CSVItem = namedtuple('CSVItem', CSVColumnNames)
-
-
-def is_header_valid(column_names: List[str]) -> bool:
-    idx_expected_name = 0
-    idx_real_name = 0
-    while idx_expected_name < len(CSVColumnNames) and idx_real_name < len(column_names):
-        expected_name = CSVColumnNames[idx_expected_name]
-        real_name = column_names[idx_real_name]
-        if expected_name == real_name:
-            idx_expected_name += 1
-            idx_real_name += 1
-        elif expected_name == 'device':
-            idx_expected_name += 1
-        elif expected_name == 'config':
-            if real_name == 'optional_model_attribute' or \
-               real_name == 'weight_compression':
-                idx_expected_name += 1
-                idx_real_name += 1
-            else:
-                idx_expected_name += 1
-        else:
-            return False
-
-    return idx_expected_name == len(CSVColumnNames) and \
-        idx_real_name == len(column_names)
-
-
-def check_header(column_names: List[str]) -> None:
-    assert is_header_valid(column_names),\
-        f"invalid header expected {CSVColumnNames} but got {column_names}"
-
-
-def get_config_value_from_path(path: str, config_values_cache: Dict[str, str]) -> str:
-    if path in config_values_cache:
-        return config_values_cache[path]
-
-    def get_attr(path: str) -> str:
-        try:
-            p = Path(path)
-            # Attempt to resolve the path to validate its syntax
-            p.resolve()
-            parts = [str(e) for e in p.parts]
-            if len(parts) < 3:
-                return ''
-            return parts[-2]
-        except Exception:
-            return ''
-    attr = get_attr(path)
-    config_values_cache[path] = attr
-    return attr
-
-
-def get_csv_header(path: str) -> List[str]:
-    with open(path) as f_in:
-        csv_reader = csv.reader(f_in, delimiter=';')
-        return next(csv_reader)
-
-
-def read_csv(path: str) -> Iterator[CSVItem]:
-    config_values_cache = {}
-    with open(path) as f_in:
-        csv_reader = csv.reader(f_in, delimiter=';')
-        column_names = next(csv_reader)
-        check_header(column_names)
-        has_config = 'optional_model_attribute' in column_names or \
-                     'weight_compression' in column_names or \
-                     'config' in column_names
-        has_device = 'device' in column_names
-        for row in csv_reader:
-            # if it's header inside CSV file
-            if row[-1] == 'duration':
-                continue
-            if not has_device:
-                row.insert(0, 'N/A')
-            if not has_config:
-                row.insert(5, '')
-            if not row[5]:
-                model_path = row[1]
-                row[5] = get_config_value_from_path(model_path, config_values_cache)
-            try:
-                csv_item = CSVItem(*row)
-            except:
-                print(f'exception in row {row}')
-                raise
-            yield csv_item
-
-
-class Unit:
-    USE_ONLY_0_ITER_GPU: bool = False
-    USE_ONLY_0_ITER: bool = False
-    ONLY_FIRST_N_ITER_NUM: Optional[int] = None
-    USE_NO_CACHE: bool = False
-
-    def __init__(self, csv_item: CSVItem):
-        self.name = None
-        self.device = csv_item.device
-        if csv_item.type == 'transformation':
-            self.name = csv_item.transformation_name
-        elif csv_item.type == 'manager':
-            self.name = csv_item.manager_name
-        self.model_path = csv_item.model_path
-        self.model_framework = csv_item.model_framework
-        self.model_precision = csv_item.model_precision
-        self.type = csv_item.type
-        self.transformation_name = csv_item.transformation_name
-        self.manager_name = csv_item.manager_name
-        self.__durations: List[float] = [float(csv_item.duration)]
-        self.__duration_median: Optional[float] = None
-        self.__deviations: Optional[List[float]] = None
-        self.__n_durations: Optional[int] = None
-        self.__duration_mean: Optional[float] = None
-
-    def get_n_durations(self) -> int:
-        if self.__n_durations is None or Unit.USE_NO_CACHE:
-            num_iterations = [len(self.__durations)]
-            if Unit.ONLY_FIRST_N_ITER_NUM is not None:
-                num_iterations.append(Unit.ONLY_FIRST_N_ITER_NUM)
-            if self.use_only_first_iter():
-                num_iterations.append(1)
-            self.__n_durations = min(num_iterations)
-        return self.__n_durations
-
-    def get_durations(self) -> List[float]:
-        return self.__durations[:self.get_n_durations()]
-
-    def use_only_first_iter(self) -> bool:
-        return Unit.USE_ONLY_0_ITER_GPU and self.device == 'GPU' or \
-               Unit.USE_ONLY_0_ITER
-
-    def get_duration_median(self) -> float:
-        if self.__duration_median is None or Unit.USE_NO_CACHE:
-            durations = self.get_durations()
-            if not durations:
-                self.__duration_median = 0.0
-            else:
-                self.__duration_median = float(np.median(durations))
-        return self.__duration_median
-
-    def get_duration_mean(self) -> float:
-        if self.__duration_mean is None or Unit.USE_NO_CACHE:
-            durations = self.get_durations()
-            if not durations:
-                self.__duration_mean = 0.0
-            else:
-                self.__duration_mean = float(np.mean(durations))
-        return self.__duration_mean
-
-    def get_deviations(self) -> List[float]:
-        if self.__deviations is None or Unit.USE_NO_CACHE:
-            median = self.get_duration_median()
-            self.__deviations = [abs(item - median) for item in self.get_durations()]
-        return self.__deviations
-
-    def get_duration_stddev(self) -> float:
-        return float(np.std(self.get_durations()))
-
-    def get_variations_as_ratio(self) -> List[float]:
-        if self.__deviations is None or Unit.USE_NO_CACHE:
-            median = self.get_duration_median()
-            self.__deviations = []
-            for item in self.__durations:
-                if median != 0.0:
-                    self.__deviations.append(abs(item - median) / median)
-                else:
-                    self.__deviations.append(0.0)
-        return self.__deviations
-
-    def add(self, csv_item: CSVItem) -> None:
-        assert self.model_path == csv_item.model_path
-        assert self.model_framework == csv_item.model_framework
-        assert self.model_precision == csv_item.model_precision
-        assert self.type == csv_item.type
-        assert self.transformation_name == csv_item.transformation_name
-        assert self.manager_name == csv_item.manager_name
-        self.__durations.append(float(csv_item.duration))
-        self.__duration_median = None
-
-
-UnitInfo = namedtuple('UnitInfo', ['type',
-                                   'transformation_name',
-                                   'manager_name'])
-
-
-class ModelData:
-    def __init__(self):
-        self.items: List[Unit] = []
-        self.__item_last_idx = None
-        self.__last_iter_num: int = 0
-
-    def append(self, csv_item: CSVItem) -> None:
-        n_iteration = int(csv_item.iteration)
-        assert n_iteration > 0
-        assert n_iteration >= self.__last_iter_num, \
-            'consistency error: the iteration numbers must follow in ascending order'
-        assert n_iteration == self.__last_iter_num or \
-            n_iteration == self.__last_iter_num + 1
-        self.__last_iter_num = n_iteration
-        if n_iteration == 1:
-            self.items.append(Unit(csv_item))
-        else:
-            if (self.__item_last_idx is None or
-                    self.__item_last_idx == len(self.items) - 1):
-                self.__item_last_idx = 0
-            else:
-                self.__item_last_idx += 1
-            self.items[self.__item_last_idx].add(csv_item)
-
-    def get_device(self):
-        # assume that all data were collected on one device
-        return self.items[0].device
-
-    def get_units(self, filter_item_func) -> Iterator[Unit]:
-        for item in self.items:
-            if filter_item_func(item):
-                yield item
-
-    def get_units_with_type(self, type_name: str) -> Iterator[Unit]:
-        return self.get_units(lambda item: item.type == type_name)
-
-    def collect_items_by_type(self, type_name: str) -> Dict[str, List[Unit]]:
-        result: Dict[str, List[Unit]] = {}
-        for item in self.get_units_with_type(type_name):
-            if item.name not in result:
-                result[item.name] = []
-            result[item.name].append(item)
-        return result
-
-    def get_compile_time(self) -> float:
-        item = next(self.get_units_with_type('compile_time'))
-        return item.get_duration_median()
-
-    def sum_transformation_time(self) -> float:
-        units = self.get_units_with_type('transformation')
-        return sum(unit.get_duration_median() for unit in units)
-
-    def get_compile_durations(self) -> List[float]:
-        item = next(self.get_units_with_type('compile_time'))
-        return item.get_durations()
-
-    def get_duration(self, i: int) -> float:
-        return self.items[i].get_duration_median()
-
-    def get_all_item_info(self) -> List[UnitInfo]:
-        data = []
-        for item in self.items:
-            data.append(UnitInfo(item.type,
-                                 item.transformation_name,
-                                 item.manager_name))
-        return data
-
-    def get_item_info(self, i: int) -> UnitInfo:
-        item = self.items[i]
-        return UnitInfo(item.type, item.transformation_name, item.manager_name)
-
-    def get_n_iterations(self):
-        if not self.items:
-            return 0
-        return self.items[0].get_n_durations()
-
-    def check(self) -> None:
-        if len(self.items) == 0:
-            return
-        assert all(e.device == self.items[0].device for e in self.items), \
-            f'different devices found in input data'
-        n_iteration_items = [item.get_n_durations() for item in self.items]
-        assert all(e == n_iteration_items[0] for e in n_iteration_items), \
-            f'different number of items in different iterations: {n_iteration_items}'
-        # check if there is compile time in each iteration
-        n_compile_time_items = sum(1 for _ in self.get_units_with_type('compile_time'))
-        assert n_compile_time_items == 1, \
-            f'iteration data must consists exact 1 compile_time item but there are: {n_compile_time_items}'
-
-
-ModelInfo = namedtuple('ModelInfo', ['framework',
-                                     'name',
-                                     'precision',
-                                     'config'])
-
-
-def read_csv_data(csv_rows: Iterator[CSVItem]) -> Dict[ModelInfo, ModelData]:
-    data: Dict[ModelInfo, ModelData] = {}
-    last_model_info = None
-    for item in csv_rows:
-        model_info = ModelInfo(item.model_framework,
-                               item.model_name,
-                               item.model_precision,
-                               item.config)
-        if model_info not in data:
-            data[model_info] = ModelData()
-        else:
-            '''consistency check for duplicates in CSV
-            - If there is already such a model_info in data we have proceeded the same IR.
-            - If previous entry in CSV file was not the same as current, we proceeded the same IR,
-              than there was another IR and now we have duplicate of model IR data   
-            '''
-            assert last_model_info is None or last_model_info == model_info, \
-                f'duplicate of {model_info} in CSV'
-        data[model_info].append(item)
-        last_model_info = model_info
-    return data
+import plot_utils
+from parse_input import get_csv_data
+from common_structs import Unit, ModelData, ModelInfo, ComparisonValues
+from table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
+    create_comparison_summary_table
 
 
 def get_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]:
@@ -373,405 +60,21 @@ def filter_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[Dict[Mo
     return filter_by_models(data, common_models)
 
 
-def sort_table(table: List[Dict], get_row_key_func) -> List[Dict]:
-    sorting_table: List[Tuple[int, float]] = []
-    for row_idx, row in enumerate(table):
-        row_key = get_row_key_func(row)
-        if not isinstance(row_key, float):
-            row_key = 0.0
-        sorting_table.append((row_idx, row_key))
-    sorted_table = sorted(sorting_table, key=lambda e: e[1], reverse=True)
-    result_table = []
-    for row in sorted_table:
-        result_table.append(table[row[0]])
-    return result_table
-
-
-def full_join_by_model_info(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[Optional[ModelData]]]]:
-    keys = set(info for data_item in data for info in data_item)
-    for model_info in keys:
-        items = (item[model_info] if model_info in item else None for item in data)
-        yield model_info, items
-
-
-class SummaryStatsCollector:
-    SummaryStats = namedtuple('SummaryStats', ['delta_median', 'delta_mean', 'delta_std', 'delta_max_abs',
-                                               'ratio_median', 'ratio_mean', 'ratio_std', 'ratio_max_abs'])
-    RatioValue = namedtuple('RatioValue', ['value1', 'value2'])
-    def __init__(self):
-        self.__array: List[SummaryStatsCollector.RatioValue] = []
-
-    def add(self, value1: float, value2: float):
-        if not isinstance(value1, float) or not isinstance(value2, float):
-            return
-        self.__array.append(SummaryStatsCollector.RatioValue(value1, value2))
-
-    def clear(self):
-        self.__array.clear()
-
-    def print_summary_stats(self, time_unit: str):
-        stats = self.get_stats()
-        header = ['value', 'median', 'mean', 'std', 'max abs']
-        rows = [{'value': f'delta ({time_unit})',
-                 'median': f'{stats.delta_median:.2f}',
-                 'mean': f'{stats.delta_mean:.2f}',
-                 'std': f'{stats.delta_std:.2f}',
-                 'max abs': f'{stats.delta_max_abs:.2f}',
-                 }, {'value': 'ratio (%)',
-                     'median': f'{stats.ratio_median:.2f}',
-                     'mean': f'{stats.ratio_mean:.2f}',
-                     'std': f'{stats.ratio_std:.2f}',
-                     'max abs': f'{stats.ratio_max_abs:.2f}'}]
-        ordered_rows_str = [{key: str(row[key]) for key in header} for row in rows]
-        print(tabulate(ordered_rows_str, headers="keys"))
-
-    @staticmethod
-    def get_stat_values(values: np.array):
-        median = np.median(values)
-        mean = np.mean(values)
-        std = np.std(values)
-        maximum = max(values, key=abs)
-        return median, mean, std, maximum
-
-    def get_stats(self) -> SummaryStats:
-        values1 = np.array([item.value1 for item in self.__array])
-        values2 = np.array([item.value2 for item in self.__array])
-        ratios = (values2 / values1 - 1.0) * 100.0
-        deltas = values2 - values1
-        delta_median, delta_mean, delta_std, delta_max = SummaryStatsCollector.get_stat_values(deltas)
-        ratio_median, ratio_mean, ratio_std, ratio_max = SummaryStatsCollector.get_stat_values(ratios)
-        return SummaryStatsCollector.SummaryStats(delta_median, delta_mean, delta_std, delta_max,
-                                                  ratio_median, ratio_mean, ratio_std, ratio_max)
-
-    def get_scatter_delta_data(self) -> List[Tuple[float, float]]:
-        pass # TODO
-        #return [(item.ratio, max(item.value1, item.value2)) for item in self.__array]
-
-
-def compare_compile_time(data: List[Dict[ModelInfo, ModelData]],
-                         stats_collector: Optional[SummaryStatsCollector]):
-    if len(data) == 0:
-        return [], []
-
-    def create_header(n_csv_files: int):
-        column_names = ['framework',
-                        'name',
-                        'precision',
-                        'config']
-        for csv_idx in range(n_csv_files):
-            column_names.append(f'compile time #{csv_idx + 1} (secs)')
-        for csv_idx in range(1, n_csv_files):
-            column_names.append(f'compile time #{csv_idx + 1} - #1 (secs)')
-        for csv_idx in range(1, n_csv_files):
-            column_names.append(f'compile time #{csv_idx + 1}/#1')
-        return column_names
-
-    def get_delta_header_names(n_csv_files: int) -> List[str]:
-        column_names = []
-        for csv_idx in range(1, n_csv_files):
-            column_names.append(f'compile time #{csv_idx + 1} - #1 (secs)')
-        return column_names
-
-
-    n_cvs_files = len(data)
-    header = create_header(n_cvs_files)
-    table = []
-    for model_info, model_data_items in full_join_by_model_info(data):
-        row = {'framework': model_info.framework,
-               'name': model_info.name,
-               'precision': model_info.precision,
-               'config': model_info.config}
-        compile_times = [model_data.get_compile_time() / 1_000_000_000 if model_data is not None else None
-                         for model_data in model_data_items]
-        for csv_idx in range(n_cvs_files):
-            value = compile_times[csv_idx] if compile_times[csv_idx] is not None else 'N/A'
-            row[f'compile time #{csv_idx + 1} (secs)'] = value
-        for csv_idx in range(1, n_cvs_files):
-            delta = 'N/A'
-            if compile_times[0] is not None and compile_times[csv_idx] is not None:
-                delta = compile_times[csv_idx] - compile_times[0]
-            row[f'compile time #{csv_idx + 1} - #1 (secs)'] = delta
-        for csv_idx in range(1, n_cvs_files):
-            ratio = 'N/A'
-            if compile_times[0] is not None and compile_times[csv_idx] is not None and compile_times[0] != 0.0:
-                ratio = compile_times[csv_idx] / compile_times[0]
-            row[f'compile time #{csv_idx + 1}/#1'] = ratio
-        table.append(row)
-
-    if stats_collector is not None:
-        for row in table:
-            value1 = row[f'compile time #1 (secs)']
-            value2 = row[f'compile time #2 (secs)']
-            if isinstance(value1, float) and isinstance(value2, float):
-                stats_collector.add(value1, value2)
-
-    delta_header_names = get_delta_header_names(n_cvs_files)
-    def get_max_delta(row: Dict) -> float:
-        return max((abs(row[key]) for key in delta_header_names if isinstance(row[key], float)),
-                   default=None)
-    return header, sort_table(table, get_max_delta)
-
-
-def compare_sum_transformation_time(data: List[Dict[ModelInfo, ModelData]],
-                                    stats_collector: Optional[SummaryStatsCollector]):
-    if len(data) == 0:
-        return [], []
-
-    def create_header(n_csv_files: int):
-        column_names = ['framework',
-                        'name',
-                        'precision',
-                        'config']
-        for csv_idx in range(n_csv_files):
-            column_names.append(f'time #{csv_idx + 1} (ms)')
-        for csv_idx in range(1, n_csv_files):
-            column_names.append(f'time #{csv_idx + 1} - #1 (ms)')
-        for csv_idx in range(1, n_csv_files):
-            column_names.append(f'time #{csv_idx + 1}/#1')
-        return column_names
-
-    def get_delta_header_names(n_csv_files: int) -> List[str]:
-        column_names = []
-        for csv_idx in range(1, n_csv_files):
-            column_names.append(f'time #{csv_idx + 1} - #1 (ms)')
-        return column_names
-
-
-    n_cvs_files = len(data)
-    header = create_header(n_cvs_files)
-    table = []
-    for model_info, model_data_items in full_join_by_model_info(data):
-        row = {'framework': model_info.framework,
-               'name': model_info.name,
-               'precision': model_info.precision,
-               'config': model_info.config}
-        compile_times = [model_data.sum_transformation_time() / 1_000_000 if model_data is not None else None
-                         for model_data in model_data_items]
-        for csv_idx in range(n_cvs_files):
-            value = compile_times[csv_idx] if compile_times[csv_idx] is not None else 'N/A'
-            row[f'time #{csv_idx + 1} (ms)'] = value
-        for csv_idx in range(1, n_cvs_files):
-            delta = 'N/A'
-            if compile_times[0] is not None and compile_times[csv_idx] is not None:
-                delta = compile_times[csv_idx] - compile_times[0]
-            row[f'time #{csv_idx + 1} - #1 (ms)'] = delta
-        for csv_idx in range(1, n_cvs_files):
-            ratio = 'N/A'
-            if compile_times[0] is not None and compile_times[csv_idx] is not None and compile_times[0] != 0.0:
-                ratio = compile_times[csv_idx] / compile_times[0]
-            row[f'time #{csv_idx + 1}/#1'] = ratio
-        table.append(row)
-
-    if stats_collector is not None:
-        for row in table:
-            value1 = row[f'time #1 (ms)']
-            value2 = row[f'time #2 (ms)']
-            if isinstance(value1, float) and isinstance(value2, float):
-                stats_collector.add(value1, value2)
-
-    delta_header_names = get_delta_header_names(n_cvs_files)
-    def get_max_delta(row: Dict) -> float:
-        return max((abs(row[key]) for key in delta_header_names if isinstance(row[key], float)),
-                   default=None)
-    return header, sort_table(table, get_max_delta)
-
-
-def get_items_by_type(data: Dict[ModelInfo, ModelData],
-                      unit_type: str) -> Dict[str, List[Unit]]:
-    result: Dict[str, List[Unit]] = {}
-    for model_info, model_data in data.items():
-        for name, units in model_data.collect_items_by_type(unit_type).items():
-            if name not in result:
-                result[name] = []
-            result[name].extend(units)
-    return result
-
-
-class Total:
-    def __init__(self):
-        self.duration: float = 0.0
-        self.count: int = 0
-
-    def append(self, total):
-        self.duration += total.duration
-        self.count += total.count
-
-
-def get_sum_duration(data: Dict[ModelInfo, ModelData],
-                     unit_type: str) -> Dict[str, Total]:
-    result: Dict[str, Total] = {} # ts name: Total
-    for name, units in get_items_by_type(data, unit_type).items():
-        total = Total()
-        total.duration = sum((unit.get_duration_median() for unit in units))
-        total.count = len(units)
-        result[name] = total
-    return result
-
-
-def get_sum_duration_all_csv(data: List[Dict[ModelInfo, ModelData]],
-                             unit_type: str):
-    result: Dict[str, Total] = {} # ts name: Total
-    for csv_item in data:
-        for name, total in get_sum_duration(csv_item, unit_type).items():
-            if name not in result:
-                result[name] = Total()
-            result[name].append(total)
-    return result
-
-
-def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
-                     unit_type: str):
-    header = ['name', 'total duration (ms)', 'count of executions']
-    table = []
-    for name, total in get_sum_duration_all_csv(data, unit_type).items():
-        row = {'name': name,
-               'total duration (ms)': total.duration / 1_000_000,
-               'count of executions': total.count}
-        table.append(row)
-    def get_duration(row: Dict) -> float:
-        return row['total duration (ms)']
-    return header, sort_table(table, get_duration)
-
-
-def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
-                      unit_type: str,
-                      stats_collector: Optional[SummaryStatsCollector]):
-    def get_duration(aggregated_data_item: Dict[str, Total], name: str) -> float:
-        duration = 0.0
-        if name in aggregated_data_item:
-            duration = aggregated_data_item[name].duration / 1_000_000
-        return duration
-
-    def get_count(aggregated_data_item: Dict[str, Total], name: str) -> int:
-        count = 0
-        if name in aggregated_data_item:
-            count = aggregated_data_item[name].count
-        return count
-
-    def create_header(n_csv_files: int):
-        column_names = ['name']
-        for i in range(n_csv_files):
-            column_names.append(f'duration #{i + 1} (ms)')
-        for i in range(1, n_csv_files):
-            column_names.append(f'duration #{i + 1} - #1 (ms)')
-        for i in range(1, n_csv_files):
-            column_names.append(f'duration #{i + 1}/#1')
-        for i in range(n_csv_files):
-            column_names.append(f'count #{i + 1}')
-        for i in range(1, n_csv_files):
-            column_names.append(f'count #{i + 1} - #1')
-        return column_names
-
-    def get_delta_header_names(n_csv_files: int) -> List[str]:
-        column_names = []
-        for csv_idx in range(1, n_csv_files):
-            column_names.append(f'duration #{csv_idx + 1} - #1 (ms)')
-        return column_names
-
-    n_csv_files = len(data)
-
-    table = []
-
-    aggregated_data = [get_sum_duration(csv_data, unit_type) for csv_data in data]
-    transformation_names = set(ts_name for aggregated_data_item in aggregated_data
-                              for ts_name in aggregated_data_item)
-
-    for name in transformation_names:
-        row = {'name' : name}
-        durations = []
-        counters = []
-        for csv_idx in range(n_csv_files):
-            durations.append(get_duration(aggregated_data[csv_idx], name))
-            counters.append(get_count(aggregated_data[csv_idx], name))
-
-        for csv_idx in range(n_csv_files):
-            row[f'duration #{csv_idx + 1} (ms)'] = durations[csv_idx]
-        for csv_idx in range(1, n_csv_files):
-            delta = durations[csv_idx] - durations[0]
-            row[f'duration #{csv_idx + 1} - #1 (ms)'] = delta
-        for csv_idx in range(1, n_csv_files):
-            ratio = 'N/A'
-            if durations[0] != 0.0:
-                ratio = durations[csv_idx]/durations[0]
-            row[f'duration #{csv_idx + 1}/#1'] = ratio
-        for csv_idx in range(n_csv_files):
-            row[f'count #{csv_idx + 1}'] = counters[csv_idx]
-        for csv_idx in range(1, n_csv_files):
-            delta = counters[csv_idx] - counters[0]
-            row[f'count #{csv_idx + 1} - #1'] = delta
-        table.append(row)
-
-    if stats_collector is not None:
-        for row in table:
-            value1 = row[f'duration #1 (ms)']
-            value2 = row[f'duration #2 (ms)']
-            if isinstance(value1, float) and isinstance(value2, float):
-                stats_collector.add(value1, value2)
-
-    header = create_header(n_csv_files)
-
-    delta_header_names = get_delta_header_names(n_csv_files)
-    def get_max_delta(row: Dict) -> float:
-        return max((abs(row[key]) for key in delta_header_names))
-    return header, sort_table(table, get_max_delta)
-
-
-def create_ratio_stats_table(data: Dict[ModelInfo, SummaryStatsCollector.SummaryStats]):
-    column_names = column_names = ['framework',
-                                   'name',
-                                   'precision',
-                                   'config', 'delta median', 'delta mean', 'delta std', 'delta max',
-                                   'ratio median', 'ratio mean', 'ratio std', 'ratio max']
-    table = []
-    for model_info, summary_stats in data.items():
-        row = {'framework': model_info.framework, 'name': model_info.name, 'precision': model_info.precision,
-               'config': model_info.config,
-               'delta median': summary_stats.delta_median,
-               'delta mean': summary_stats.delta_mean,
-               'delta std': summary_stats.delta_std,
-               'delta max': summary_stats.delta_max_abs,
-               'ratio median': summary_stats.ratio_median,
-               'ratio mean': summary_stats.ratio_mean,
-               'ratio std': summary_stats.ratio_std,
-               'ratio max': summary_stats.ratio_max_abs
-                }
-        table.append(row)
-    def get_delta_max(row: Dict) -> float:
-        return row['delta max']
-    return column_names, sort_table(table, get_delta_max)
-
-
-def check_csv_data(data: List[Dict[ModelInfo, ModelData]]) -> None:
-    if not data:
-        return
-    first_info = next(iter(data[0]))
-    first_device = data[0][first_info].get_device()
-    assert all(m_data.get_device() == first_device for d in data for _, m_data in d.items()), \
-        f'different devices found in input data'
-
-
-def remove_invalid_items(data: Dict[ModelInfo, ModelData]) -> Dict[ModelInfo, ModelData]:
-    valid_data = {}
-    for model_info, model_data in data.items():
-        try:
-            model_data.check()
-            valid_data[model_info] = model_data
-        except AssertionError as e:
-            print(f'Removed invalid model data: {model_info} due to: {e}')
-    return valid_data
-
-
-def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
-    csv_data = []
-    for csv_path in csv_paths:
-        print(f'reading {csv_path} ...')
-        csv_rows = read_csv(csv_path)
-        current_csv_data = read_csv_data(csv_rows)
-        current_csv_data = remove_invalid_items(current_csv_data)
-        if current_csv_data:
-            csv_data.append(current_csv_data)
-    check_csv_data(csv_data)
-    return csv_data
+def print_summary_stats(values: ComparisonValues):
+    stats = values.get_stats()
+    header = ['value', 'median', 'mean', 'std', 'max abs']
+    rows = [{'value': f'delta ({stats.unit})',
+             'median': f'{stats.delta_median:.2f}',
+             'mean': f'{stats.delta_mean:.2f}',
+             'std': f'{stats.delta_std:.2f}',
+             'max abs': f'{stats.delta_max_abs:.2f}',
+             }, {'value': 'ratio (%)',
+                 'median': f'{stats.ratio_median:.2f}',
+                 'mean': f'{stats.ratio_mean:.2f}',
+                 'std': f'{stats.ratio_std:.2f}',
+                 'max abs': f'{stats.ratio_max_abs:.2f}'}]
+    ordered_rows_str = [{key: str(row[key]) for key in header} for row in rows]
+    print(tabulate(ordered_rows_str, headers="keys"))
 
 
 def get_device(data: List[Dict[ModelInfo, ModelData]]) -> str:
@@ -785,14 +88,17 @@ def get_all_models(data: List[Dict[ModelInfo, ModelData]]) -> Set[ModelInfo]:
     return set(model_info for csv_data in data for model_info in csv_data)
 
 
-def make_model_file_name(model_info: ModelInfo, prefix: str) -> str:
+def make_model_file_name(prefix: str, model_info: ModelInfo, extension: str) -> str:
     name = [prefix,
             model_info.framework,
             model_info.name,
             model_info.precision]
     if model_info.config:
         name.append(model_info.config)
-    return '_'.join(name) + '.csv'
+    name = '_'.join(name)
+    if extension:
+        name = name + '.' + extension
+    return name
 
 
 def make_model_console_description(model_info: ModelInfo) -> str:
@@ -802,6 +108,37 @@ def make_model_console_description(model_info: ModelInfo) -> str:
     if model_info.config:
         name.append(model_info.config)
     return ' '.join(name)
+
+
+class PlotOutput:
+    def __init__(self, path_prefix, title_prefix: str):
+        self.path_prefix = path_prefix
+        self.title_prefix = title_prefix
+
+    def plot_into_file(self, values: ComparisonValues, prefix: str):
+        delta_hist_path = prefix + '_delta_hist.png'
+        deltas = values.get_differences()
+        title = self.title_prefix + ' value#2 - value#1'
+        plot_utils.gen_hist(deltas, title, f'value #2 - value #1, {values.unit}', 'number of items', delta_hist_path)
+
+        ratio_hist_path = prefix + '_ratio_hist.png'
+        ratios = values.get_ratios()
+        title = self.title_prefix + ' value#2/value#1'
+        plot_utils.gen_hist(ratios, title, 'value #2/value #1 - 1, %', 'number of items', ratio_hist_path)
+
+        scatter_path = prefix + '_scatter.png'
+        max_values = values.get_max_values()
+        title = self.title_prefix + ' value#2/value#1'
+        plot_utils.gen_scatter(max_values, ratios, title, f'max (value #1, value #2), {values.unit}',
+                           'value #2/value #1 - 1, %', scatter_path)
+
+    def plot_for_model(self, model_info: ModelInfo, values: ComparisonValues):
+        prefix = make_model_file_name(self.path_prefix, model_info, '')
+        self.plot_into_file(values, prefix)
+
+    def plot(self, values: ComparisonValues):
+        prefix = self.path_prefix
+        self.plot_into_file(values, prefix)
 
 
 class Output(ABC):
@@ -817,10 +154,6 @@ class Output(ABC):
         pass
 
     @abstractmethod
-    def write_header(self):
-        pass
-
-    @abstractmethod
     def write(self, row: List[Dict[str, str]]):
         pass
 
@@ -832,15 +165,11 @@ class CSVOutput(Output):
         self.limit_output = limit_output
         self.file = None
 
-    def write_header(self):
-        assert self.header is not None
-        csv_writer = csv.DictWriter(self.file, fieldnames=self.header, delimiter=';')
-        csv_writer.writeheader()
-
     def write(self, rows: List[Dict[str, str]]):
         assert self.file is not None
         assert self.header is not None
         csv_writer = csv.DictWriter(self.file, fieldnames=self.header, delimiter=';')
+        csv_writer.writeheader()
         if self.limit_output:
             rows = rows[:self.limit_output]
         for row in rows:
@@ -861,9 +190,6 @@ class ConsoleTableOutput(Output):
         self.description = description
         self.limit_output = limit_output
         self.file = None
-
-    def write_header(self):
-        pass
 
     def write(self, rows: List[Dict[str, str]]):
         assert self.header is not None
@@ -886,18 +212,19 @@ class SingleOutputFactory(ABC):
         pass
 
     @abstractmethod
-    def create(self, header: List[str]):
+    def create_table(self, header: List[str]):
         pass
 
 
 class CSVSingleFileOutputFactory(SingleOutputFactory):
-    def __init__(self, path: str, limit_output):
+    def __init__(self, path_prefix: str, limit_output):
         super().__init__()
-        self.path = path
+        self.path_prefix = path_prefix
         self.limit_output = limit_output
 
-    def create(self, header: List[str]):
-        return CSVOutput(self.path, header, self.limit_output)
+    def create_table(self, header: List[str]):
+        path = self.path_prefix + '.csv'
+        return CSVOutput(path, header, self.limit_output)
 
 
 class ConsoleTableSingleFileOutputFactory(SingleOutputFactory):
@@ -906,7 +233,7 @@ class ConsoleTableSingleFileOutputFactory(SingleOutputFactory):
         self.description = description
         self.limit_output = limit_output
 
-    def create(self, header: List[str]):
+    def create_table(self, header: List[str]):
         return ConsoleTableOutput(header, self.description, self.limit_output)
 
 
@@ -915,7 +242,7 @@ class MultiOutputFactory(ABC):
         pass
 
     @abstractmethod
-    def create(self, header: List[str], model_info: ModelInfo):
+    def create_table(self, header: List[str], model_info: ModelInfo):
         pass
 
 
@@ -925,8 +252,8 @@ class CSVMultiFileOutputFactory(MultiOutputFactory):
         self.prefix = prefix
         self.limit_output = limit_output
 
-    def create(self, header: List[str], model_info: ModelInfo):
-        return CSVOutput(make_model_file_name(model_info, self.prefix), header, self.limit_output)
+    def create_table(self, header: List[str], model_info: ModelInfo):
+        return CSVOutput(make_model_file_name(self.prefix, model_info, 'csv'), header, self.limit_output)
 
 
 class ConsoleTableMultiOutputFactory(MultiOutputFactory):
@@ -935,7 +262,7 @@ class ConsoleTableMultiOutputFactory(MultiOutputFactory):
         self.description = description
         self.limit_output = limit_output
 
-    def create(self, header: List[str], model_info: ModelInfo):
+    def create_table(self, header: List[str], model_info: ModelInfo):
         return ConsoleTableOutput(header, make_model_console_description(model_info), self.limit_output)
 
 
@@ -949,9 +276,10 @@ class DataProcessor(ABC):
 
 
 class CompareCompileTime(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory, summary_stats_collector: Optional[SummaryStatsCollector]):
+    def __init__(self, output_factory: SingleOutputFactory, summary_stats: bool, plot_output: Optional[PlotOutput]):
         super().__init__(output_factory)
-        self.__summary_stats_collector = summary_stats_collector
+        self.__summary_stats = summary_stats
+        self.__plot_output = plot_output
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing compile time ...')
@@ -959,18 +287,21 @@ class CompareCompileTime(DataProcessor):
         if not csv_data:
             print('no common models to compare compilation time ...')
             return
-        header, table = compare_compile_time(csv_data, self.__summary_stats_collector)
-        if self.__summary_stats_collector:
-            self.__summary_stats_collector.print_summary_stats('sec')
-        with self.output_factory.create(header) as output:
+        header, table, comparison_values = compare_compile_time(csv_data)
+        if self.__summary_stats:
+            print_summary_stats(comparison_values)
+        if self.__plot_output:
+            self.__plot_output.plot(comparison_values)
+        with self.output_factory.create_table(header) as output:
             output.write_header()
             output.write(table)
 
 
 class CompareSumTransformationTime(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory, summary_stats_collector: Optional[SummaryStatsCollector]):
+    def __init__(self, output_factory: SingleOutputFactory, summary_stats: bool, plot_output: Optional[PlotOutput]):
         super().__init__(output_factory)
-        self.__summary_stats_collector = summary_stats_collector
+        self.__summary_stats = summary_stats
+        self.__plot_output = plot_output
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing sum transformation time ...')
@@ -978,11 +309,12 @@ class CompareSumTransformationTime(DataProcessor):
         if not csv_data:
             print('no common models to compare compilation time ...')
             return
-        header, table = compare_sum_transformation_time(csv_data, self.__summary_stats_collector)
-        if self.__summary_stats_collector:
-            self.__summary_stats_collector.print_summary_stats('ms')
-        with self.output_factory.create(header) as output:
-            output.write_header()
+        header, table, comparison_values = compare_sum_transformation_time(csv_data)
+        if self.__summary_stats:
+            print_summary_stats(comparison_values)
+        if self.__plot_output:
+            self.__plot_output.plot(comparison_values)
+        with self.output_factory.create_table(header) as output:
             output.write(table)
 
 
@@ -994,8 +326,7 @@ class GenerateLongestUnitsOverall(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} overall data ...')
         header, table = get_longest_unit(csv_data, self.unit_type)
-        with self.output_factory.create(header) as output:
-            output.write_header()
+        with self.output_factory.create_table(header) as output:
             output.write(table)
 
 
@@ -1008,54 +339,85 @@ class GenerateLongestUnitsPerModel(DataProcessor):
         print(f'aggregating longest {self.unit_type} per model data ...')
         for model_info in get_all_models(csv_data):
             header, table = get_longest_unit(filter_by_models(csv_data, [model_info]), self.unit_type)
-            with self.output_factory.create(header, model_info) as output:
-                output.write_header()
+            with self.output_factory.create_table(header, model_info) as output:
                 output.write(table)
 
 
 class CompareSumUnitsOverall(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory, unit_type: str,
-                 summary_statistics_collector: Optional[SummaryStatsCollector]):
+    def __init__(self, output_factory: SingleOutputFactory, unit_type: str, summary_stats: bool, plot_output: Optional[PlotOutput]):
         super().__init__(output_factory)
         self.unit_type = unit_type
-        self.__summary_statistics_collector = summary_statistics_collector
+        self.__summary_stats = summary_stats
+        self.__plot_output = plot_output
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} overall data ...')
         csv_data_common_models = filter_common_models(csv_data)
-        header, table = compare_sum_units(csv_data_common_models, self.unit_type, self.__summary_statistics_collector)
-        if self.__summary_statistics_collector:
-            self.__summary_statistics_collector.print_summary_stats('ms')
-        with self.output_factory.create(header) as output:
-            output.write_header()
+        header, table, comparison_values = compare_sum_units(csv_data_common_models, self.unit_type)
+        if self.__summary_stats:
+            print_summary_stats(comparison_values)
+        if self.__plot_output:
+            self.__plot_output.plot(comparison_values)
+        with self.output_factory.create_table(header) as output:
             output.write(table)
+
+
+class ProgressStatus:
+    def __init__(self, total_iterations: int):
+        self.total_iterations = total_iterations
+        self.current_iteration = 0
+        self.last_length = 0
+
+    def update(self, status: str):
+        self.current_iteration += 1
+        percent_complete = (self.current_iteration / self.total_iterations) * 100
+        message = f'Progress: {percent_complete:.2f}% - {status}'
+        sys.stdout.write('\r' + ' ' * self.last_length)
+        sys.stdout.write('\r' + message)
+        sys.stdout.flush()
+        self.last_length = len(message)
+
+    def complete(self):
+        sys.stdout.write('\n')
+        sys.stdout.flush()
 
 
 class CompareSumUnitsPerModel(DataProcessor):
     def __init__(self, output_factory: MultiOutputFactory,
-                 summary_output_factory: SingleOutputFactory,
-                 unit_type: str, summary_statistics_collector: Optional[SummaryStatsCollector]):
+                 summary_output_factory: Optional[SingleOutputFactory],
+                 unit_type: str, plot_output: Optional[PlotOutput]):
         super().__init__(output_factory)
         self.unit_type = unit_type
         self.__summary_output_factory = summary_output_factory
-        self.__summary_statistics_collector = summary_statistics_collector
+        self.__plot_output = plot_output
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} per model data ...')
         csv_data_common_models = filter_common_models(csv_data)
-        ratio_stats_overall = {}
-        for model_info in get_all_models(csv_data_common_models):
-            self.__summary_statistics_collector.clear()
-            header, table = compare_sum_units(filter_by_models(csv_data, [model_info]), self.unit_type, self.__summary_statistics_collector)
-            ratio_stats_overall[model_info] = self.__summary_statistics_collector.get_stats()
-            with self.output_factory.create(header, model_info) as output:
-                output.write_header()
+        comparison_values_overall = {}
+        models = get_all_models(csv_data_common_models)
+        progress_status = ProgressStatus(len(models))
+        for model_info in models:
+            progress_status.update(f'{model_info.framework} {model_info.name} {model_info.precision} {model_info.config}')
+            header, table, comparison_values = compare_sum_units(filter_by_models(csv_data,[model_info]),
+                                                                 self.unit_type)
+            comparison_values_overall[model_info] = comparison_values
+            with self.output_factory.create_table(header, model_info) as output:
                 output.write(table)
-        if ratio_stats_overall:
-            header, table = create_ratio_stats_table(ratio_stats_overall)
-            with self.__summary_output_factory.create(header) as output:
-                output.write_header()
+            if self.__plot_output:
+                self.__plot_output.plot_for_model(model_info, comparison_values)
+        progress_status.complete()
+        if self.__summary_output_factory:
+            header, table = create_comparison_summary_table(comparison_values_overall)
+            with self.__summary_output_factory.create_table(header) as output:
                 output.write(table)
+        if self.__plot_output:
+            combined_comparison_values = ComparisonValues(self.unit_type)
+            for values in comparison_values_overall.values():
+                combined_comparison_values.values1.extend(values.values1)
+                combined_comparison_values.values2.extend(values.values2)
+            combined_comparison_values = combined_comparison_values.filter_values_by_min(float(1_000))
+            self.__plot_output.plot(combined_comparison_values)
 
 
 @dataclass
@@ -1076,6 +438,7 @@ class Config:
     inputs: List[str] = field(default_factory=list)
     summary_statistics: bool = False
     summary_ratio_histogram: bool = False
+    plots: bool = False
 
 
 def parse_args() -> Config:
@@ -1087,7 +450,7 @@ For example, if you have 2 input CSV files /dir1/file1.csv and /dir2/file2.csv, 
 {script_bin} --input /dir1/file1.csv,/dir2/file2.csv
 ''')
     args_parser.add_argument('--compare_compile_time', nargs='?', type=str, default=None,
-                             const='compile_time_comparison.csv',
+                             const='compile_time_comparison',
                              help='compare compile time between input files; for common models between inputs')
     args_parser.add_argument('--compare_sum_transformation_time', nargs='?', type=str, default=None,
                              const='transformation_sum_time_comparison.csv',
@@ -1147,7 +510,7 @@ You can specify output names prefix, for example
 and there will be files prefix_to_name_<framework>_<model>_<precision>[_<additional_model_attribute>].csv
 ''')
     args_parser.add_argument('--compare_transformations_overall', nargs='?', type=str, default=None,
-                             const='comparison_transformations_overall.csv',
+                             const='comparison_transformations_overall',
                              metavar='path to output file',
                              help=f'''aggregate transformations overall models data and compare between input CSV files
 For example, if you have 2 input CSV files /dir1/file1.csv and /dir2/file2.csv, generated by dev_trigger job, you can specify them
@@ -1166,7 +529,7 @@ You can specify output names prefix, for example
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_transformations_overall /dir3/output3
 ''')
     args_parser.add_argument('--compare_managers_overall', nargs='?', type=str, default=None,
-                             const='compare_managers_overall.csv',
+                             const='compare_managers_overall',
                              metavar='path to output file',
                              help=f'''aggregate managers overall models data and compare between input CSV files
 For example, if you have 2 input CSV files /dir1/file1.csv and /dir2/file2.csv, generated by dev_trigger job, you can specify them
@@ -1241,13 +604,17 @@ For example, to output only first 15 rows in table
 Output summary statistics if compare 2 input CSV files
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --summary_statistics
 ''')
+    args_parser.add_argument('--plots', action='store_true',
+                             help=f'''
+Output histograms and scatter plots if compare 2 input CSV files
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --plots
+''')
     args = args_parser.parse_args()
-
-    config = Config()
-
     if not args.input:
         print('specify input CSV files separated by comma')
         sys.exit(1)
+
+    config = Config()
     config.inputs = args.input.split(',')
 
     if any(not s for s in config.inputs):
@@ -1274,13 +641,17 @@ Output summary statistics if compare 2 input CSV files
         config.summary_statistics = True
     else:
         config.summary_statistics = False
+    if args.plots:
+        config.plots = True
+    else:
+        config.plots = False
 
     return config
 
 
-def create_single_output_factory(output_type: str, path: str, description: str, limit_output):
+def create_single_output_factory(output_type: str, path_prefix: str, description: str, limit_output):
     if output_type == 'csv':
-        return CSVSingleFileOutputFactory(path, limit_output)
+        return CSVSingleFileOutputFactory(path_prefix, limit_output)
     return ConsoleTableSingleFileOutputFactory(description, limit_output)
 
 
@@ -1297,12 +668,6 @@ def create_summary_output_factory(output_type: str, prefix: str, description: st
     return ConsoleTableSingleFileOutputFactory(description, None)
 
 
-def create_summary_stats_collector(config: Config):
-    if config.summary_statistics:
-        return SummaryStatsCollector()
-    return None
-
-
 def main(config: Config) -> None:
     data_processors = []
     if config.compare_compile_time:
@@ -1310,15 +675,29 @@ def main(config: Config) -> None:
                                                       config.compare_compile_time,
                                                       'compilation time',
                                                       config.limit_output)
-        summary_stats_collector = create_summary_stats_collector(config)
-        data_processors.append(CompareCompileTime(output_factory, summary_stats_collector))
+        plot_output_factory = None
+        if config.plots:
+            path_prefix = config.compare_compile_time
+            if not path_prefix:
+                path_prefix = 'compilation'
+            title_prefix = 'compilation time'
+            plot_output_factory = PlotOutput(path_prefix, title_prefix)
+        data_processors.append(CompareCompileTime(output_factory, config.summary_statistics,
+                                                  plot_output_factory))
     if config.compare_sum_transformation_time:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.compare_sum_transformation_time,
                                                       'sum transformation time',
                                                       config.limit_output)
-        summary_stats_collector = create_summary_stats_collector(config)
-        data_processors.append(CompareSumTransformationTime(output_factory, summary_stats_collector))
+        plot_output_factory = None
+        if config.plots:
+            path_prefix = config.compare_sum_transformation_time
+            if not path_prefix:
+                path_prefix = 'sum_ts'
+            title_prefix = 'sum transformation time'
+            plot_output_factory = PlotOutput(path_prefix, title_prefix)
+        data_processors.append(CompareSumTransformationTime(output_factory, config.summary_statistics,
+                                                            plot_output_factory))
     if config.transformations_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.transformations_overall,
@@ -1348,17 +727,31 @@ def main(config: Config) -> None:
                                                       config.compare_transformations_overall,
                                                       'compare transformations overall',
                                                       config.limit_output)
-        summary_stats_collector = create_summary_stats_collector(config)
+        plot_output_factory = None
+        if config.plots:
+            path_prefix = config.compare_transformations_overall
+            if not path_prefix:
+                path_prefix = 'ts_overall'
+            title_prefix = 'transformations overall time'
+            plot_output_factory = PlotOutput(path_prefix, title_prefix)
         data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='transformation',
-                                                      summary_statistics_collector=summary_stats_collector))
+                                                      summary_stats=config.summary_statistics,
+                                                      plot_output=plot_output_factory))
     if config.compare_managers_overall:
         output_factory = create_single_output_factory(config.output_type,
                                                       config.compare_managers_overall,
                                                       'compare managers overall',
                                                       config.limit_output)
-        summary_stats_collector = create_summary_stats_collector(config)
+        plot_output_factory = None
+        if config.plots:
+            path_prefix = config.compare_managers_overall
+            if not path_prefix:
+                path_prefix = 'managers_overall'
+            title_prefix = 'compare managers overall time'
+            plot_output_factory = PlotOutput(path_prefix, title_prefix)
         data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='manager',
-                                                      summary_statistics_collector=summary_stats_collector))
+                                                      summary_stats=config.summary_statistics,
+                                                      plot_output=plot_output_factory))
     if config.compare_transformations_per_model:
         output_factory = create_multi_output_factory(config.output_type,
                                                      config.compare_transformations_per_model,
@@ -1367,21 +760,32 @@ def main(config: Config) -> None:
         summary_output_factory = create_summary_output_factory(config.output_type,
                                                                config.compare_transformations_per_model,
                                                                'compare transformations per model')
-        summary_stats_collector = create_summary_stats_collector(config)
+        plot_output_factory = None
+        if config.plots:
+            path_prefix = config.compare_transformations_per_model
+            if not path_prefix:
+                path_prefix = 'compare_ts'
+            title_prefix = 'compare transformations time'
+            plot_output_factory = PlotOutput(path_prefix, title_prefix)
         data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory,
-                                                       unit_type='transformation',
-                                                       summary_statistics_collector=summary_stats_collector))
+                                                       unit_type='transformation', plot_output=plot_output_factory))
     if config.compare_managers_per_model:
         output_factory = create_multi_output_factory(config.output_type,
                                                      config.compare_managers_per_model,
                                                      'compare managers per model',
                                                      config.limit_output)
         summary_output_factory = create_summary_output_factory(config.output_type,
-                                                               config.compare_transformations_per_model,
+                                                               config.compare_managers_per_model,
                                                                'compare managers per model')
-        summary_stats_collector = create_summary_stats_collector(config)
+        plot_output_factory = None
+        if config.plots:
+            path_prefix = config.compare_managers_per_model
+            if not path_prefix:
+                path_prefix = 'compare_managers'
+            title_prefix = 'compare managers time'
+            plot_output_factory = PlotOutput(path_prefix, title_prefix)
         data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory, unit_type='manager',
-                                                       summary_statistics_collector=summary_stats_collector))
+                                                       plot_output=plot_output_factory))
 
 
     if not data_processors:
