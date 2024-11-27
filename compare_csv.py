@@ -12,7 +12,7 @@ from typing import List, Dict, Set, Optional, Iterator
 import numpy as np
 
 import plot_utils
-from parse_input import get_csv_data
+from parse_input import get_csv_data, get_input_csv_files
 from common_structs import Unit, ModelData, ModelInfo, ComparisonValues, full_join_by_model_info
 from table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
     create_comparison_summary_table
@@ -754,7 +754,7 @@ Don't generate CSV output files. Is useful with --plots option
 Number of plot segments. Is useful with --plots option
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --plots --no_csv --n_plot_segments 3
 ''')
-    args_parser.add_argument('--plot_compile_time_by_iteration', type=int, default=1,
+    args_parser.add_argument('--plot_compile_time_by_iteration', action='store_true',
                              help=f'''
 Plot graph with Y - compilation time and X - iteration number
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_compile_time_by_iteration
@@ -943,7 +943,7 @@ def main(config: Config) -> None:
         print('nothing to do ...')
         return
 
-    csv_data = get_csv_data(config.inputs)
+    csv_data = get_csv_data(get_input_csv_files(config.inputs))
     if config.model_name:
         csv_data = filter_by_model_name(csv_data, config.model_name)
     for proc in data_processors:

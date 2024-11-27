@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from collections import namedtuple
+import os
 from pathlib import Path
 from typing import List, Dict, Iterator
 
@@ -9,29 +9,10 @@ from common_structs import ModelInfo, ModelData, CSVItem, CSVColumnNames
 
 
 def is_header_valid(column_names: List[str]) -> bool:
-    idx_expected_name = 0
-    idx_real_name = 0
-    while idx_expected_name < len(CSVColumnNames) and idx_real_name < len(column_names):
-        expected_name = CSVColumnNames[idx_expected_name]
-        real_name = column_names[idx_real_name]
-        if expected_name == real_name:
-            idx_expected_name += 1
-            idx_real_name += 1
-        elif expected_name == 'device':
-            idx_expected_name += 1
-        elif expected_name == 'config':
-            if real_name == 'optional_model_attribute' or \
-               real_name == 'weight_compression' or \
-               real_name == 'status':
-                idx_expected_name += 1
-                idx_real_name += 1
-            else:
-                idx_expected_name += 1
-        else:
-            return False
-
-    return idx_expected_name == len(CSVColumnNames) and \
-        idx_real_name == len(column_names)
+    optional_columns = {'device', 'status', 'config', 'optional_model_attribute', 'weight_compression'}
+    expected_required_names = [e for e in CSVColumnNames if e not in optional_columns]
+    real_required_names = [e for e in column_names if e not in optional_columns]
+    return expected_required_names == real_required_names
 
 
 def check_header(column_names: List[str]) -> None:
@@ -151,3 +132,22 @@ def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
             csv_data.append(current_csv_data)
     check_csv_data(csv_data)
     return csv_data
+
+
+def get_all_csv(dir_path: str) -> List[str]:
+    csv_files: List[str] = []
+    for root, dirs, files in os.walk(dir_path):
+        for file in files:
+            if file.endswith('.csv'):
+                csv_files.append(os.path.join(root, file))
+    return csv_files
+
+
+def get_input_csv_files(inputs: List[str]) -> List[str]:
+    csv_files: List[str] = []
+    for input_path in inputs:
+        if os.path.isdir(input_path):
+            csv_files.extend(get_all_csv(input_path))
+        else:
+            csv_files.append(input_path)
+    return sorted(csv_files)

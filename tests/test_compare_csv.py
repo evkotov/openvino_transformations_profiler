@@ -9,7 +9,7 @@ from common_structs import Unit, ModelData, ModelInfo
 
 class TestUnit(unittest.TestCase):
     def test_initializes_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         unit = Unit(csv_item)
         self.assertEqual(unit.device, 'GPU')
         self.assertEqual(unit.name, 'transformation_name')
@@ -22,63 +22,63 @@ class TestUnit(unittest.TestCase):
         self.assertEqual(unit.get_durations(), [10.0])
 
     def test_calculates_duration_median_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         unit = Unit(csv_item)
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '15.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '15.0', '1')
         unit.add(csv_item)
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '23.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '23.0', '1')
         unit.add(csv_item)
         self.assertEqual(unit.get_duration_median(), 15.0)
 
     def test_calculates_deviations_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         unit = Unit(csv_item)
         self.assertEqual(unit.get_deviations(), [0.0])
 
     def test_calculates_duration_stddev_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         unit = Unit(csv_item)
         self.assertEqual(unit.get_duration_stddev(), 0.0)
 
     def test_calculates_variations_as_ratio_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         unit = Unit(csv_item)
         self.assertEqual(unit.get_variations_as_ratio(), [0.0])
 
     def test_adds_csv_item_correctly(self):
-        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
-        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0')
+        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
+        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0', '1')
         unit = Unit(csv_item1)
         unit.add(csv_item2)
         self.assertEqual(unit.get_durations(), [10.0, 20.0])
 
     def test_uses_only_first_iter_correctly(self):
         Unit.USE_ONLY_0_ITER_GPU = True
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         unit = Unit(csv_item)
         self.assertTrue(unit.use_only_first_iter())
         Unit.USE_ONLY_0_ITER_GPU = False
 
     def test_gpu_first_iter_correctly(self):
         Unit.USE_ONLY_0_ITER_GPU = True
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         unit = Unit(csv_item)
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '15.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '15.0', '1')
         unit.add(csv_item)
         self.assertEqual(unit.get_durations(), [10.0])
 
 
 class TestModelData(unittest.TestCase):
     def test_appends_first_iteration_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         model_data = ModelData()
         model_data.append(csv_item)
         self.assertEqual(len(model_data.items), 1)
         self.assertEqual(model_data.items[0].get_durations(), [10.0])
 
     def test_appends_subsequent_iterations_correctly(self):
-        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
-        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0')
+        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
+        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0', '1')
         model_data = ModelData()
         model_data.append(csv_item1)
         model_data.append(csv_item2)
@@ -86,23 +86,23 @@ class TestModelData(unittest.TestCase):
         self.assertEqual(model_data.items[0].get_durations(), [10.0, 20.0])
 
     def test_raises_error_on_non_ascending_iterations(self):
-        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0')
-        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0', '1')
+        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         model_data = ModelData()
         with self.assertRaises(AssertionError):
             model_data.append(csv_item1)
             model_data.append(csv_item2)
 
     def test_gets_device_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         model_data = ModelData()
         model_data.append(csv_item)
         self.assertEqual(model_data.get_device(), 'GPU')
 
     def test_collects_items_by_type_correctly(self):
-        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
-        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0')
-        csv_item3 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'manager', 'transformation_name', '', '10.0')
+        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
+        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0', '1')
+        csv_item3 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'manager', 'transformation_name', '', '10.0', '1')
         model_data = ModelData()
         model_data.append(csv_item1)
         model_data.append(csv_item2)
@@ -111,18 +111,18 @@ class TestModelData(unittest.TestCase):
         self.assertEqual(items_by_type['transformation_name'][0].get_durations(), [10.0, 20.0])
 
     def test_calculates_compile_time_correctly(self):
-        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'compile_time', '', '', '10.0')
-        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'compile_time', '', '', '11.0')
+        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'compile_time', '', '', '10.0', '1')
+        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'compile_time', '', '', '11.0', '1')
         model_data = ModelData()
         model_data.append(csv_item1)
         model_data.append(csv_item2)
         self.assertEqual(model_data.get_compile_time(), 10.5)
 
     def test_sums_transformation_time_correctly(self):
-        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name1', '', '10.0')
-        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name2', '', '20.0')
-        csv_item3 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name1', '', '11.0')
-        csv_item4 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name2', '', '21.0')
+        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name1', '', '10.0', '1')
+        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name2', '', '20.0', '1')
+        csv_item3 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name1', '', '11.0', '1')
+        csv_item4 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name2', '', '21.0', '1')
         model_data = ModelData()
         model_data.append(csv_item1)
         model_data.append(csv_item2)
@@ -131,19 +131,19 @@ class TestModelData(unittest.TestCase):
         self.assertEqual(model_data.sum_transformation_time(), 31.0)
 
     def test_gets_compile_durations_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'compile_time', '', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'compile_time', '', '', '10.0', '1')
         model_data = ModelData()
         model_data.append(csv_item)
         self.assertEqual(model_data.get_compile_durations(), [10.0])
 
     def test_gets_duration_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         model_data = ModelData()
         model_data.append(csv_item)
         self.assertEqual(model_data.get_duration(0), 10.0)
 
     def test_gets_all_item_info_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         model_data = ModelData()
         model_data.append(csv_item)
         item_info = model_data.get_all_item_info()
@@ -151,15 +151,15 @@ class TestModelData(unittest.TestCase):
         self.assertEqual(item_info[0].type, 'transformation')
 
     def test_gets_item_info_correctly(self):
-        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
+        csv_item = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
         model_data = ModelData()
         model_data.append(csv_item)
         item_info = model_data.get_item_info(0)
         self.assertEqual(item_info.type, 'transformation')
 
     def test_gets_n_iterations_correctly(self):
-        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0')
-        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0')
+        csv_item1 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '1', 'transformation', 'transformation_name', '', '10.0', '1')
+        csv_item2 = CSVItem('GPU', 'path/to/model', 'model_name', 'framework', 'precision', '', '2', 'transformation', 'transformation_name', '', '20.0', '1')
         model_data = ModelData()
         model_data.append(csv_item1)
         model_data.append(csv_item2)
@@ -243,37 +243,37 @@ class TestReadCSV(unittest.TestCase):
         self.assertEqual(len(csv_items), 1)
         self.assertEqual(csv_items[0].device, 'N/A')
 
-    def test_header_with_all_required_columns(self):
-        column_names = ['device', 'model_path', 'model_name', 'model_framework', 'model_precision', 'config', 'iteration', 'type', 'transformation_name', 'manager_name', 'duration']
+    def header_is_valid_with_correct_columns(self):
+        column_names = ['model_framework', 'model_name', 'model_precision', 'device', 'status', 'config']
         self.assertTrue(is_header_valid(column_names))
 
-    def test_header_with_optional_columns(self):
-        column_names = ['device', 'model_path', 'model_name', 'model_framework', 'model_precision', 'optional_model_attribute', 'iteration', 'type', 'transformation_name', 'manager_name', 'duration']
+    def header_is_valid_with_optional_columns(self):
+        column_names = ['model_framework', 'model_name', 'model_precision', 'optional_model_attribute', 'device', 'status']
         self.assertTrue(is_header_valid(column_names))
 
-    def test_header_with_weight_compression(self):
-        column_names = ['device', 'model_path', 'model_name', 'model_framework', 'model_precision', 'weight_compression', 'iteration', 'type', 'transformation_name', 'manager_name', 'duration']
+    def header_is_valid_with_weight_compression(self):
+        column_names = ['model_framework', 'model_name', 'model_precision', 'weight_compression', 'device', 'status']
         self.assertTrue(is_header_valid(column_names))
 
-    def test_header_with_missing_device(self):
-        column_names = ['model_path', 'model_name', 'model_framework', 'model_precision', 'config', 'iteration', 'type', 'transformation_name', 'manager_name', 'duration']
-        self.assertTrue(is_header_valid(column_names))
-
-    def test_header_with_missing_config(self):
-        column_names = ['device', 'model_path', 'model_name', 'model_framework', 'model_precision', 'iteration', 'type', 'transformation_name', 'manager_name', 'duration']
-        self.assertTrue(is_header_valid(column_names))
-
-    def test_header_with_extra_columns(self):
-        column_names = ['device', 'model_path', 'model_name', 'model_framework', 'model_precision', 'config', 'iteration', 'type', 'transformation_name', 'manager_name', 'duration', 'extra_column']
+    def header_is_invalid_with_missing_columns(self):
+        column_names = ['model_framework', 'model_name', 'model_precision']
         self.assertFalse(is_header_valid(column_names))
 
-    def test_header_with_missing_required_columns(self):
-        column_names = ['model_path', 'model_name', 'model_framework', 'model_precision', 'iteration', 'type', 'transformation_name', 'manager_name']
+    def header_is_invalid_with_extra_columns(self):
+        column_names = ['model_framework', 'model_name', 'model_precision', 'config', 'device', 'status', 'extra_column']
         self.assertFalse(is_header_valid(column_names))
 
-    def test_header_with_incorrect_order(self):
-        column_names = ['model_path', 'device', 'model_name', 'model_framework', 'model_precision', 'config', 'iteration', 'type', 'transformation_name', 'manager_name', 'duration']
+    def header_is_invalid_with_wrong_order(self):
+        column_names = ['model_name', 'model_framework', 'model_precision', 'config', 'device', 'status']
         self.assertFalse(is_header_valid(column_names))
+
+    def header_is_invalid_without_config_and_optional_columns(self):
+        column_names = ['model_framework', 'model_name', 'model_precision', 'device', 'status']
+        self.assertFalse(is_header_valid(column_names))
+
+    def header_is_valid_with_only_required_columns(self):
+        column_names = ['model_framework', 'model_name', 'model_precision']
+        self.assertTrue(is_header_valid(column_names))
 
 
 class TestGetConfigValueFromPath(unittest.TestCase):
