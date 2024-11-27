@@ -552,6 +552,32 @@ class PlotCompileTimeByIteration(DataProcessor):
             gen_compile_time_by_iterations_one_common_median('.', device, model_info, durations, 'Compile time', 'compile_time')
 
 
+def get_model_sum_units_durations_by_iteration(model_data: ModelData, unit_type: str) -> List[float]:
+    units = model_data.get_units_with_type(unit_type)
+    durations = np.fromiter((num for unit in units for num in unit.get_durations()), float)
+    n_iterations = model_data.get_n_iterations()
+    durations = durations.reshape(-1, n_iterations)
+    return np.sum(durations, axis=0).tolist()
+
+
+def get_sum_units_durations_by_iteration(csv_data: List[Dict[ModelInfo, ModelData]],
+                                         unit_type: str) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        durations = (get_model_sum_units_durations_by_iteration(data, unit_type) for data in model_data_items
+                     if data is not None)
+        yield model_info, durations
+
+
+class PlotSumTSTimeByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, durations in get_sum_units_durations_by_iteration(csv_data, 'transformation'):
+            gen_compile_time_by_iterations_one_common_median('.', device, model_info, durations, 'Sum of transformations', 'sum_ts')
+
+
 @dataclass
 class Config:
     compare_compile_time = None
@@ -574,6 +600,7 @@ class Config:
     no_csv: bool = False
     n_plot_segments: int = 1
     plot_compile_time_by_iteration: bool = False
+    plot_sum_ts_time_by_iteration: bool = False
 
 
 def parse_args() -> Config:
@@ -759,10 +786,17 @@ Number of plot segments. Is useful with --plots option
 Plot graph with Y - compilation time and X - iteration number
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_compile_time_by_iteration
 ''')
+    args_parser.add_argument('--plot_sum_ts_time_by_iteration', action='store_true',
+                             help=f'''
+Plot graph with Y - sum transformation time and X - iteration number
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_sum_ts_time_by_iteration
+''')
+
     args = args_parser.parse_args()
     if not args.input:
         print('specify input CSV files separated by comma')
         sys.exit(1)
+
 
     config = Config()
     config.inputs = args.input.split(',')
@@ -796,6 +830,8 @@ Plot graph with Y - compilation time and X - iteration number
         config.plots = True
     if args.plot_compile_time_by_iteration:
         config.plot_compile_time_by_iteration = True
+    if args.plot_sum_ts_time_by_iteration:
+        config.plot_sum_ts_time_by_iteration = True
 
     return config
 
@@ -938,6 +974,9 @@ def main(config: Config) -> None:
 
     if config.plot_compile_time_by_iteration:
         data_processors.append(PlotCompileTimeByIteration())
+
+    if config.plot_sum_ts_time_by_iteration:
+        data_processors.append(PlotSumTSTimeByIteration())
 
     if not data_processors:
         print('nothing to do ...')
