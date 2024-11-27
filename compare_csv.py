@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import sys
 import os
 from tabulate import tabulate
-from typing import List, Dict, Set, Optional, Iterator
+from typing import List, Dict, Set, Optional, Iterator, Tuple
 
 import numpy as np
 
