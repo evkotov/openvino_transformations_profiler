@@ -2,9 +2,10 @@ import unittest
 import os
 from collections import namedtuple
 
-from compare_csv import make_model_file_name, make_model_console_description, get_common_models, CSVOutput
-from parse_input import CSVItem, get_csv_header, read_csv, remove_invalid_items, get_config_value_from_path, is_header_valid
-from common_structs import Unit, ModelData, ModelInfo
+from ov_ts_profiler.output_utils import make_model_file_name, CSVOutput
+from ov_ts_profiler.stat_utils import get_common_models
+from ov_ts_profiler.parse_input import CSVItem, get_csv_header, read_csv, remove_invalid_items, get_config_value_from_path, is_header_valid
+from ov_ts_profiler.common_structs import Unit, ModelData, ModelInfo, make_model_console_description
 
 
 class TestUnit(unittest.TestCase):

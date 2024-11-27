@@ -1,6 +1,5 @@
 from typing import List, Dict, Iterator, Tuple
-from compare_csv import get_items_by_type
-from common_structs import Unit, ModelData, ModelInfo, full_join_by_model_info
+from ov_ts_profiler.common_structs import Unit, ModelData, ModelInfo, full_join_by_model_info
 from collections import namedtuple
 import numpy as np
 

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import List, Dict, Iterator
 
-from common_structs import ModelInfo, ModelData, CSVItem, CSVColumnNames
+from ov_ts_profiler.common_structs import ModelInfo, ModelData, CSVItem, CSVColumnNames
 
 
 def is_header_valid(column_names: List[str]) -> bool:

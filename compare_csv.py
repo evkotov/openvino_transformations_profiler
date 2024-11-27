@@ -2,259 +2,18 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import argparse
-import csv
 from dataclasses import dataclass, field
 import sys
-import os
-from tabulate import tabulate
-from typing import List, Dict, Set, Optional, Iterator, Tuple
+from typing import List, Dict, Optional
 
-import numpy as np
-
-import plot_utils
-from parse_input import get_csv_data, get_input_csv_files
-from common_structs import Unit, ModelData, ModelInfo, ComparisonValues, full_join_by_model_info
-from table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
+from ov_ts_profiler.output_utils import print_summary_stats, make_model_file_name, NoOutput, CSVOutput, ConsoleTableOutput
+from ov_ts_profiler.parse_input import get_csv_data, get_input_csv_files
+from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description
+from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations
+from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, filter_common_models, get_device, get_all_models, \
+    compile_time_by_iterations, get_sum_units_durations_by_iteration
+from ov_ts_profiler.table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
     create_comparison_summary_table
-
-
-def get_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]:
-    if len(data) == 0:
-        return []
-    common_keys = data[0].keys()
-    for csv_data in data:
-        common_keys &= csv_data.keys()
-    return list(common_keys)
-
-
-def filter_by_models(data: List[Dict[ModelInfo, ModelData]],
-                     models: List[ModelInfo]) -> List[Dict[ModelInfo, ModelData]]:
-    new_data = []
-    for csv_data in data:
-        new_dict = {}
-        for model_info in models:
-            if model_info in csv_data:
-                new_dict[model_info] = csv_data[model_info]
-        if new_dict:
-            new_data.append(new_dict)
-    return new_data
-
-
-def filter_by_model_name(data: List[Dict[ModelInfo, ModelData]],
-                         model_name: str) -> List[Dict[ModelInfo, ModelData]]:
-    new_data = []
-    for csv_data in data:
-        new_dict = {}
-        for model_info in csv_data:
-            if model_info.name != model_name:
-                continue
-            new_dict[model_info] = csv_data[model_info]
-        if new_dict:
-            new_data.append(new_dict)
-    return new_data
-
-
-def filter_common_models(data: List[Dict[ModelInfo, ModelData]]) -> List[Dict[ModelInfo, ModelData]]:
-    common_models: List[ModelInfo] = get_common_models(data)
-    return filter_by_models(data, common_models)
-
-
-def print_summary_stats(values: ComparisonValues):
-    stats = values.get_stats()
-    header = ['value', 'median', 'mean', 'std', 'max abs']
-    rows = [{'value': f'delta ({stats.unit})',
-             'median': f'{stats.delta_median:.2f}',
-             'mean': f'{stats.delta_mean:.2f}',
-             'std': f'{stats.delta_std:.2f}',
-             'max abs': f'{stats.delta_max_abs:.2f}',
-             }, {'value': 'ratio (%)',
-                 'median': f'{stats.ratio_median:.2f}',
-                 'mean': f'{stats.ratio_mean:.2f}',
-                 'std': f'{stats.ratio_std:.2f}',
-                 'max abs': f'{stats.ratio_max_abs:.2f}'}]
-    ordered_rows_str = [{key: str(row[key]) for key in header} for row in rows]
-    print(tabulate(ordered_rows_str, headers="keys"))
-
-
-def get_device(data: List[Dict[ModelInfo, ModelData]]) -> str:
-    if not data:
-        return ''
-    key = next(iter(data[0]))
-    return data[0][key].get_device()
-
-
-def get_all_models(data: List[Dict[ModelInfo, ModelData]]) -> Set[ModelInfo]:
-    return set(model_info for csv_data in data for model_info in csv_data)
-
-
-def make_model_file_name(prefix: str, model_info: ModelInfo, extension: str) -> str:
-    name = []
-    if prefix:
-        name = [prefix]
-    name.extend([model_info.framework,
-                 model_info.name,
-                 model_info.precision])
-    if model_info.config:
-        name.append(model_info.config)
-    name = '_'.join(name)
-    if extension:
-        name = name + '.' + extension
-    return name
-
-
-def make_model_console_description(model_info: ModelInfo) -> str:
-    name = [model_info.framework,
-            model_info.name,
-            model_info.precision]
-    if model_info.config:
-        name.append(model_info.config)
-    return ' '.join(name)
-
-
-def find_iqr_outlier_indexes(values) -> Set[int]:
-    q1 = np.percentile(values, 25)
-    q3 = np.percentile(values, 75)
-    iqr = q3 - q1
-    lower_bound = q1 - 1.5 * iqr
-    upper_bound = q3 + 1.5 * iqr
-    indexes = (i for i, x in enumerate(values) if x < lower_bound or x > upper_bound)
-    return set(indexes)
-
-
-class PlotOutput:
-    def __init__(self, path_prefix, title_prefix: str, n_segments: int):
-        self.path_prefix = path_prefix
-        self.title_prefix = title_prefix
-        self.n_segments = n_segments
-
-    def plot_for_model(self, model_info: ModelInfo, values: ComparisonValues):
-        prefix = make_model_file_name(self.path_prefix, model_info, '')
-        self.plot_into_file(values, prefix)
-
-    def plot_into_file(self, values: ComparisonValues, prefix: str):
-        ratios = values.get_ratios()
-        max_values = values.get_max_values()
-        assert len(ratios) == len(max_values)
-
-        ratio_outlier_indexes = find_iqr_outlier_indexes(ratios)
-        log_numbers = np.log(max_values)
-        min_log = np.min(log_numbers)
-        max_log = np.max(log_numbers)
-        bins = np.linspace(min_log, max_log, self.n_segments  + 1)
-        indices = np.digitize(log_numbers, bins)
-
-        for i in range(1, self.n_segments  + 1):
-            x_part = []
-            y_part = []
-            n_outliers = 0
-            for j in range(len(max_values)):
-                if indices[j] != i:
-                    continue
-                if j in ratio_outlier_indexes:
-                    n_outliers += 1
-                    continue
-                x_part.append(max_values[j])
-                y_part.append(ratios[j])
-
-            if not x_part:
-                continue
-
-            y_values = np.array(y_part)
-            y_median = float(np.median(y_values))
-
-            outliers_percent = n_outliers / len(max_values) * 100.0
-            title = f'{self.title_prefix} ratio part {i} without outliers ({outliers_percent:.2f} %)'
-            scatter_path = f'{prefix}_scatter_part{i}.png'
-
-            y_label = f'ratio (value #2/value #1 - 1), %'
-            x_label = f'max (value #1, value #2), {values.unit}'
-            scatter = plot_utils.ScatterPlot(title, x_label, y_label)
-            scatter.set_values(x_part, y_part)
-            scatter.add_horizontal_line(y_median, f'median {y_median:.2f} %')
-            scatter.plot(scatter_path)
-
-    def plot(self, values: ComparisonValues):
-        self.plot_into_file(values, self.path_prefix)
-
-
-class Output(ABC):
-    def __init__(self, header: List[str]):
-        self.header = header
-
-    @abstractmethod
-    def __enter__(self):
-        return self
-
-    @abstractmethod
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-    @abstractmethod
-    def write(self, row: List[Dict[str, str]]):
-        pass
-
-
-class NoOutput(Output):
-    def __init__(self):
-        super().__init__([])
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-    def write(self, row: List[Dict[str, str]]):
-        pass
-
-
-class CSVOutput(Output):
-    def __init__(self, path: str, header: List[str], limit_output):
-        super().__init__(header)
-        self.path = path
-        self.limit_output = limit_output
-        self.file = None
-
-    def write(self, rows: List[Dict[str, str]]):
-        assert self.file is not None
-        assert self.header is not None
-        csv_writer = csv.DictWriter(self.file, fieldnames=self.header, delimiter=';')
-        csv_writer.writeheader()
-        if self.limit_output:
-            rows = rows[:self.limit_output]
-        for row in rows:
-            csv_writer.writerow(row)
-
-    def __enter__(self):
-        self.file = open(self.path, 'w', newline='')
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.file:
-            self.file.close()
-
-
-class ConsoleTableOutput(Output):
-    def __init__(self, header: List[str], description: str, limit_output):
-        super().__init__(header)
-        self.description = description
-        self.limit_output = limit_output
-        self.file = None
-
-    def write(self, rows: List[Dict[str, str]]):
-        assert self.header is not None
-        if self.limit_output:
-            rows = rows[:self.limit_output]
-        print(self.description)
-        ordered_rows_str = [{key: str(row[key]) for key in self.header} for row in rows]
-        table = tabulate(ordered_rows_str, headers="keys")
-        print(table)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
 
 
 class SingleOutputFactory(ABC):
@@ -409,7 +168,8 @@ class GenerateLongestUnitsPerModel(DataProcessor):
 
 
 class CompareSumUnitsOverall(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory, unit_type: str, summary_stats: bool, plot_output: Optional[PlotOutput]):
+    def __init__(self, output_factory: SingleOutputFactory, unit_type: str, summary_stats: bool, plot_output: Optional[
+        PlotOutput]):
         super().__init__(output_factory)
         self.unit_type = unit_type
         self.__summary_stats = summary_stats
@@ -464,7 +224,7 @@ class CompareSumUnitsPerModel(DataProcessor):
         progress_status = ProgressStatus(len(models))
         for model_info in models:
             progress_status.update(f'{model_info.framework} {model_info.name} {model_info.precision} {model_info.config}')
-            header, table, comparison_values = compare_sum_units(filter_by_models(csv_data,[model_info]),
+            header, table, comparison_values = compare_sum_units(filter_by_models(csv_data, [model_info]),
                                                                  self.unit_type)
             comparison_values_overall[model_info] = comparison_values
             with self.output_factory.create_table(header, model_info) as output:
@@ -485,63 +245,6 @@ class CompareSumUnitsPerModel(DataProcessor):
             self.__plot_output.plot(combined_comparison_values)
 
 
-def get_compile_durations(model_data_items: Iterator[ModelData]) -> Iterator[List[float]]:
-    return (model_data.get_compile_durations() for model_data in model_data_items if model_data is not None)
-
-
-def compile_time_by_iterations(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
-    for model_info, model_data_items in full_join_by_model_info(csv_data):
-        yield model_info, get_compile_durations(model_data_items)
-    return
-
-
-def gen_compile_time_by_iterations_one_common_median(output_dir: str,
-                                                     device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
-                                                     what: str, file_prefix: str):
-    title = f'{what} {device} {model_info.framework} {model_info.name} {model_info.precision}'
-    if model_info.config:
-        title += f' {model_info.config}'
-    x_label = 'iteration number'
-    y_label = f'{what} (seconds)'
-
-    plot = plot_utils.Plot(title, x_label, y_label)
-    plot.set_x_ticks_func(plot_utils.generate_x_ticks_cast_to_int)
-
-    all_compile_time_values = []
-    for durations in model_data_items:
-        compile_time_values = [float(duration) / 1_000_000_000 for duration in durations]
-        iterations = [i for i in range(1, len(compile_time_values) + 1)]
-        all_compile_time_values.extend(compile_time_values)
-
-        assert len(compile_time_values) == len(iterations)
-        plot.add(iterations, compile_time_values)
-
-    if not all_compile_time_values:
-        print(f'no values for {model_info}')
-        return
-
-    # Calculate the median value of y_values
-    median_value = float(np.median(all_compile_time_values))
-    plot.append_x_line(median_value, f'Median: {"%.2f" % median_value} seconds', 'red', '--')
-
-    # maximum deviation from median in %
-    max_deviation_abs = max((item for item in all_compile_time_values), key=lambda e: abs(e - median_value))
-    max_deviation = abs(median_value - max_deviation_abs) * 100.0 / median_value
-
-    if max_deviation > 1.0:
-        # Calculate 10% deviation from the median
-        deviation = 0.01 * median_value
-        lower_bound = median_value - deviation
-        upper_bound = median_value + deviation
-        plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
-
-    path = os.path.join(output_dir, f'{file_prefix}_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
-    if model_info.config:
-        path += f'_{model_info.config}'
-    path += '.png'
-    plot.plot(path)
-
-
 class PlotCompileTimeByIteration(DataProcessor):
     def __init__(self):
         super().__init__(None)
@@ -549,23 +252,7 @@ class PlotCompileTimeByIteration(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         device = get_device(csv_data)
         for model_info, durations in compile_time_by_iterations(csv_data):
-            gen_compile_time_by_iterations_one_common_median('.', device, model_info, durations, 'Compile time', 'compile_time')
-
-
-def get_model_sum_units_durations_by_iteration(model_data: ModelData, unit_type: str) -> List[float]:
-    units = model_data.get_units_with_type(unit_type)
-    durations = np.fromiter((num for unit in units for num in unit.get_durations()), float)
-    n_iterations = model_data.get_n_iterations()
-    durations = durations.reshape(-1, n_iterations)
-    return np.sum(durations, axis=0).tolist()
-
-
-def get_sum_units_durations_by_iteration(csv_data: List[Dict[ModelInfo, ModelData]],
-                                         unit_type: str) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
-    for model_info, model_data_items in full_join_by_model_info(csv_data):
-        durations = (get_model_sum_units_durations_by_iteration(data, unit_type) for data in model_data_items
-                     if data is not None)
-        yield model_info, durations
+            gen_plot_time_by_iterations('.', device, model_info, durations, 'Compile time', 'compile_time')
 
 
 class PlotSumTSTimeByIteration(DataProcessor):
@@ -575,7 +262,7 @@ class PlotSumTSTimeByIteration(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         device = get_device(csv_data)
         for model_info, durations in get_sum_units_durations_by_iteration(csv_data, 'transformation'):
-            gen_compile_time_by_iterations_one_common_median('.', device, model_info, durations, 'Sum of transformations', 'sum_ts')
+            gen_plot_time_by_iterations('.', device, model_info, durations, 'Sum of transformations', 'sum_ts')
 
 
 @dataclass

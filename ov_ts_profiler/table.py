@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Tuple
-from common_structs import ModelInfo, ModelData, ComparisonValues, full_join_by_model_info
+from ov_ts_profiler.common_structs import ModelInfo, ModelData, ComparisonValues, full_join_by_model_info
 
 
 def get_comparison_values(table: List[Dict], key1: str, key2: str, unit: str):

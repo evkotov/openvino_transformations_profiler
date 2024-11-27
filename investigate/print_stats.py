@@ -1,7 +1,6 @@
 import os
 import sys
-from parse_input import get_csv_data
-from common_structs import ModelInfo
+from ov_ts_profiler.parse_input import get_csv_data
 from typing import List
 
 

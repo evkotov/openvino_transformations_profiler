@@ -1,9 +1,15 @@
+from __future__ import annotations
+
+import os
 from collections import namedtuple
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Iterator
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ov_ts_profiler.common_structs import ModelInfo, ComparisonValues
+from ov_ts_profiler.output_utils import make_model_file_name
+from ov_ts_profiler.stat_utils import find_iqr_outlier_indexes
 
 PlotDots = namedtuple('PlotDots', ['x_values', 'y_values', 'label'])
 Stripe = namedtuple('Stripe', ['lower_bound', 'upper_bound', 'label'])
@@ -193,3 +199,106 @@ class ScatterPlot:
         plt.savefig(path)
         # Close the plot so it doesn't show up
         plt.close()
+
+
+class PlotOutput:
+    def __init__(self, path_prefix, title_prefix: str, n_segments: int):
+        self.path_prefix = path_prefix
+        self.title_prefix = title_prefix
+        self.n_segments = n_segments
+
+    def plot_for_model(self, model_info: ModelInfo, values: ComparisonValues):
+        prefix = make_model_file_name(self.path_prefix, model_info, '')
+        self.plot_into_file(values, prefix)
+
+    def plot_into_file(self, values: ComparisonValues, prefix: str):
+        ratios = values.get_ratios()
+        max_values = values.get_max_values()
+        assert len(ratios) == len(max_values)
+
+        ratio_outlier_indexes = find_iqr_outlier_indexes(ratios)
+        log_numbers = np.log(max_values)
+        min_log = np.min(log_numbers)
+        max_log = np.max(log_numbers)
+        bins = np.linspace(min_log, max_log, self.n_segments  + 1)
+        indices = np.digitize(log_numbers, bins)
+
+        for i in range(1, self.n_segments  + 1):
+            x_part = []
+            y_part = []
+            n_outliers = 0
+            for j in range(len(max_values)):
+                if indices[j] != i:
+                    continue
+                if j in ratio_outlier_indexes:
+                    n_outliers += 1
+                    continue
+                x_part.append(max_values[j])
+                y_part.append(ratios[j])
+
+            if not x_part:
+                continue
+
+            y_values = np.array(y_part)
+            y_median = float(np.median(y_values))
+
+            outliers_percent = n_outliers / len(max_values) * 100.0
+            title = f'{self.title_prefix} ratio part {i} without outliers ({outliers_percent:.2f} %)'
+            scatter_path = f'{prefix}_scatter_part{i}.png'
+
+            y_label = f'ratio (value #2/value #1 - 1), %'
+            x_label = f'max (value #1, value #2), {values.unit}'
+            scatter = ScatterPlot(title, x_label, y_label)
+            scatter.set_values(x_part, y_part)
+            scatter.add_horizontal_line(y_median, f'median {y_median:.2f} %')
+            scatter.plot(scatter_path)
+
+    def plot(self, values: ComparisonValues):
+        self.plot_into_file(values, self.path_prefix)
+
+
+def gen_plot_time_by_iterations(output_dir: str,
+                                                     device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
+                                                     what: str, file_prefix: str):
+    title = f'{what} {device} {model_info.framework} {model_info.name} {model_info.precision}'
+    if model_info.config:
+        title += f' {model_info.config}'
+    x_label = 'iteration number'
+    y_label = f'{what} (seconds)'
+
+    plot = Plot(title, x_label, y_label)
+    plot.set_x_ticks_func(generate_x_ticks_cast_to_int)
+
+    all_compile_time_values = []
+    for durations in model_data_items:
+        compile_time_values = [float(duration) / 1_000_000_000 for duration in durations]
+        iterations = [i for i in range(1, len(compile_time_values) + 1)]
+        all_compile_time_values.extend(compile_time_values)
+
+        assert len(compile_time_values) == len(iterations)
+        plot.add(iterations, compile_time_values)
+
+    if not all_compile_time_values:
+        print(f'no values for {model_info}')
+        return
+
+    # Calculate the median value of y_values
+    median_value = float(np.median(all_compile_time_values))
+    plot.append_x_line(median_value, f'Median: {"%.2f" % median_value} seconds', 'red', '--')
+
+    # maximum deviation from median in %
+    max_deviation_abs = max((item for item in all_compile_time_values), key=lambda e: abs(e - median_value))
+    max_deviation = abs(median_value - max_deviation_abs) * 100.0 / median_value
+
+    if max_deviation > 1.0:
+        # Calculate 10% deviation from the median
+        deviation = 0.01 * median_value
+        lower_bound = median_value - deviation
+        upper_bound = median_value + deviation
+        plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
+
+    path = os.path.join(output_dir, f'{file_prefix}_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
+    if model_info.config:
+        path += f'_{model_info.config}'
+    path += '.png'
+    plot.plot(path)

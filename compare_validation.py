@@ -3,7 +3,7 @@ import sys
 from typing import Dict, List
 import numpy as np
 
-from plot_utils import Hist
+from ov_ts_profiler.plot_utils import Hist
 
 
 def load_json(json_file):

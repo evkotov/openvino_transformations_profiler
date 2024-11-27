@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from common_structs import ComparisonValues, SummaryStats
+from ov_ts_profiler.common_structs import ComparisonValues, SummaryStats
 
 class TestComparisonValues(unittest.TestCase):
 

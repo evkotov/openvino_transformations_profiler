@@ -1,6 +1,5 @@
 import unittest
-from table import get_comparison_values, compare_compile_time, sort_table
-from common_structs import ModelInfo, ModelData
+from ov_ts_profiler.table import get_comparison_values, sort_table
 
 
 class TestTableFunctions(unittest.TestCase):

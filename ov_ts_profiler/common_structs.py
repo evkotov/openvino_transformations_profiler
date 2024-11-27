@@ -263,3 +263,12 @@ def full_join_by_model_info(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[
     for model_info in keys:
         items = (item[model_info] if model_info in item else None for item in data)
         yield model_info, items
+
+
+def make_model_console_description(model_info: ModelInfo) -> str:
+    name = [model_info.framework,
+            model_info.name,
+            model_info.precision]
+    if model_info.config:
+        name.append(model_info.config)
+    return ' '.join(name)

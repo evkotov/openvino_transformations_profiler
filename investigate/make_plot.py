@@ -4,16 +4,15 @@ import sys
 from typing import List, Iterator, Dict, Optional, Tuple
 import numpy as np
 
-from compare_csv import get_device
-from table import sort_table
-from parse_input import get_csv_data
+from ov_ts_profiler.table import sort_table
+from ov_ts_profiler.parse_input import get_csv_data
 from stat_utils import (
     get_iter_time_values, compile_time_by_iterations,
     get_stddev_unit_durations_all_csv, get_sum_units_durations_by_iteration,
-    get_model_unit_sum_by_iterations_all_csv, get_model_units_deviations_by_iter_all_csv
+    get_model_unit_sum_by_iterations_all_csv, get_model_units_deviations_by_iter_all_csv, get_device
 )
-from common_structs import Unit, ModelInfo
-from plot_utils import Plot, Hist, ScatterPlot, generate_x_ticks_cast_to_int
+from ov_ts_profiler.common_structs import Unit, ModelInfo
+from ov_ts_profiler.plot_utils import Plot, Hist, ScatterPlot, generate_x_ticks_cast_to_int
 
 
 def gen_compile_time_by_iterations_multiple_median(device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
