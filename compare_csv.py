@@ -951,6 +951,4 @@ def main(config: Config) -> None:
 
 
 if __name__ == '__main__':
-    Unit.USE_ONLY_0_ITER_GPU = True
-    Unit.USE_ONLY_0_ITER = False
     main(parse_args())
