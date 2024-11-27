@@ -21,7 +21,8 @@ def is_header_valid(column_names: List[str]) -> bool:
             idx_expected_name += 1
         elif expected_name == 'config':
             if real_name == 'optional_model_attribute' or \
-               real_name == 'weight_compression':
+               real_name == 'weight_compression' or \
+               real_name == 'status':
                 idx_expected_name += 1
                 idx_real_name += 1
             else:
@@ -74,6 +75,7 @@ def read_csv(path: str) -> Iterator[CSVItem]:
                      'weight_compression' in column_names or \
                      'config' in column_names
         has_device = 'device' in column_names
+        has_status = 'status' in column_names
         for row in csv_reader:
             # if it's header inside CSV file
             if row[-1] == 'duration':
@@ -82,6 +84,8 @@ def read_csv(path: str) -> Iterator[CSVItem]:
                 row.insert(0, 'N/A')
             if not has_config:
                 row.insert(5, '')
+            if not has_status:
+                row.append('N/A')
             if not row[5]:
                 model_path = row[1]
                 row[5] = get_config_value_from_path(model_path, config_values_cache)

@@ -15,7 +15,8 @@ CSVColumnNames = ('device',
                   'type',
                   'transformation_name',
                   'manager_name',
-                  'duration')
+                  'duration',
+                  'status')
 
 
 CSVItem = namedtuple('CSVItem', CSVColumnNames)
@@ -40,6 +41,7 @@ class Unit:
         self.type = csv_item.type
         self.transformation_name = csv_item.transformation_name
         self.manager_name = csv_item.manager_name
+        self.status: Optional[bool] = csv_item.status
         self.__durations: List[float] = [float(csv_item.duration)]
         self.__duration_median: Optional[float] = None
         self.__deviations: Optional[List[float]] = None
