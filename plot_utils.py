@@ -193,11 +193,3 @@ class ScatterPlot:
         plt.savefig(path)
         # Close the plot so it doesn't show up
         plt.close()
-
-
-def gen_hist(values, title: str, x_label: str, y_label: str, path: str):
-    hist = Hist(title, x_label, y_label)
-    hist.set_bins(50)
-    hist.set_values(values)
-    hist.plot(path)
-

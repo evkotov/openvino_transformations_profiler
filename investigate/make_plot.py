@@ -272,8 +272,8 @@ if __name__ == '__main__':
     process_and_replicate_structure(sys.argv[1], sys.argv[2], gen_compile_time)
     '''
     inputs = get_input_csv_files(sys.argv[1:])
-    gen_compile_time_by_iterations_from_input('.', inputs, 'qwen2-7b')
+    gen_compile_time_by_iterations_from_input('.', inputs, None)
     #gen_stddev_units_from_input(inputs, 'transformation', 1.0)
-    gen_transformations_sum_time_by_iterations_from_input('.', inputs,'transformation', 'qwen2-7b')
+    gen_transformations_sum_time_by_iterations_from_input('.', inputs,'transformation', None)
     #gen_csv_transformations_sum_time_by_iterations_from_input(inputs, 'transformation')
     #gen_deviation_units_from_input(inputs, 'transformation', 1.0)

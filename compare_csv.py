@@ -2,19 +2,18 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import argparse
-from collections import namedtuple
 import csv
 from dataclasses import dataclass, field
 import sys
-
+import os
 from tabulate import tabulate
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional, Iterator
 
 import numpy as np
 
 import plot_utils
 from parse_input import get_csv_data
-from common_structs import Unit, ModelData, ModelInfo, ComparisonValues
+from common_structs import Unit, ModelData, ModelInfo, ComparisonValues, full_join_by_model_info
 from table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
     create_comparison_summary_table
 
@@ -162,7 +161,6 @@ class PlotOutput:
 
             y_values = np.array(y_part)
             y_median = float(np.median(y_values))
-            mad_median = np.median(np.abs(y_values - y_median))
 
             outliers_percent = n_outliers / len(max_values) * 100.0
             title = f'{self.title_prefix} ratio part {i} without outliers ({outliers_percent:.2f} %)'
@@ -487,6 +485,73 @@ class CompareSumUnitsPerModel(DataProcessor):
             self.__plot_output.plot(combined_comparison_values)
 
 
+def get_compile_durations(model_data_items: Iterator[ModelData]) -> Iterator[List[float]]:
+    return (model_data.get_compile_durations() for model_data in model_data_items if model_data is not None)
+
+
+def compile_time_by_iterations(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        yield model_info, get_compile_durations(model_data_items)
+    return
+
+
+def gen_compile_time_by_iterations_one_common_median(output_dir: str,
+                                                     device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
+                                                     what: str, file_prefix: str):
+    title = f'{what} {device} {model_info.framework} {model_info.name} {model_info.precision}'
+    if model_info.config:
+        title += f' {model_info.config}'
+    x_label = 'iteration number'
+    y_label = f'{what} (seconds)'
+
+    plot = plot_utils.Plot(title, x_label, y_label)
+    plot.set_x_ticks_func(plot_utils.generate_x_ticks_cast_to_int)
+
+    all_compile_time_values = []
+    for durations in model_data_items:
+        compile_time_values = [float(duration) / 1_000_000_000 for duration in durations]
+        iterations = [i for i in range(1, len(compile_time_values) + 1)]
+        all_compile_time_values.extend(compile_time_values)
+
+        assert len(compile_time_values) == len(iterations)
+        plot.add(iterations, compile_time_values)
+
+    if not all_compile_time_values:
+        print(f'no values for {model_info}')
+        return
+
+    # Calculate the median value of y_values
+    median_value = float(np.median(all_compile_time_values))
+    plot.append_x_line(median_value, f'Median: {"%.2f" % median_value} seconds', 'red', '--')
+
+    # maximum deviation from median in %
+    max_deviation_abs = max((item for item in all_compile_time_values), key=lambda e: abs(e - median_value))
+    max_deviation = abs(median_value - max_deviation_abs) * 100.0 / median_value
+
+    if max_deviation > 1.0:
+        # Calculate 10% deviation from the median
+        deviation = 0.01 * median_value
+        lower_bound = median_value - deviation
+        upper_bound = median_value + deviation
+        plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
+
+    path = os.path.join(output_dir, f'{file_prefix}_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
+    if model_info.config:
+        path += f'_{model_info.config}'
+    path += '.png'
+    plot.plot(path)
+
+
+class PlotCompileTimeByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, durations in compile_time_by_iterations(csv_data):
+            gen_compile_time_by_iterations_one_common_median('.', device, model_info, durations, 'Compile time', 'compile_time')
+
+
 @dataclass
 class Config:
     compare_compile_time = None
@@ -508,6 +573,7 @@ class Config:
     plots: bool = False
     no_csv: bool = False
     n_plot_segments: int = 1
+    plot_compile_time_by_iteration: bool = False
 
 
 def parse_args() -> Config:
@@ -688,6 +754,11 @@ Don't generate CSV output files. Is useful with --plots option
 Number of plot segments. Is useful with --plots option
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --plots --no_csv --n_plot_segments 3
 ''')
+    args_parser.add_argument('--plot_compile_time_by_iteration', type=int, default=1,
+                             help=f'''
+Plot graph with Y - compilation time and X - iteration number
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_compile_time_by_iteration
+''')
     args = args_parser.parse_args()
     if not args.input:
         print('specify input CSV files separated by comma')
@@ -723,6 +794,8 @@ Number of plot segments. Is useful with --plots option
         config.summary_statistics = True
     if args.plots:
         config.plots = True
+    if args.plot_compile_time_by_iteration:
+        config.plot_compile_time_by_iteration = True
 
     return config
 
@@ -863,6 +936,8 @@ def main(config: Config) -> None:
         data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory, unit_type='manager',
                                                        plot_output=plot_output_factory))
 
+    if config.plot_compile_time_by_iteration:
+        data_processors.append(PlotCompileTimeByIteration())
 
     if not data_processors:
         print('nothing to do ...')

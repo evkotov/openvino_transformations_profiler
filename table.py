@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import List, Dict, Optional, Tuple, Iterator
-from common_structs import ModelInfo, ModelData, ComparisonValues, SummaryStats
+from typing import List, Dict, Tuple
+from common_structs import ModelInfo, ModelData, ComparisonValues, full_join_by_model_info
 
 
 def get_comparison_values(table: List[Dict], key1: str, key2: str, unit: str):
@@ -312,11 +312,3 @@ def sort_table(table: List[Dict], get_row_key_func) -> List[Dict]:
     for row in sorted_table:
         result_table.append(table[row[0]])
     return result_table
-
-
-def full_join_by_model_info(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[
-    ModelInfo, Iterator[Optional[ModelData]]]]:
-    keys = set(info for data_item in data for info in data_item)
-    for model_info in keys:
-        items = (item[model_info] if model_info in item else None for item in data)
-        yield model_info, items

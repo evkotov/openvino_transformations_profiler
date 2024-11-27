@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import namedtuple
-from typing import Optional, List, Iterator, Dict
+from typing import Optional, List, Iterator, Dict, Tuple
 
 import numpy as np
 
@@ -253,3 +253,10 @@ class ComparisonValues:
         return SummaryStats(delta_median, delta_mean, delta_std, delta_max,
                             ratio_median, ratio_mean, ratio_std, ratio_max, self.unit)
 
+
+def full_join_by_model_info(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[
+    ModelInfo, Iterator[Optional[ModelData]]]]:
+    keys = set(info for data_item in data for info in data_item)
+    for model_info in keys:
+        items = (item[model_info] if model_info in item else None for item in data)
+        yield model_info, items
