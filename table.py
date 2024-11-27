@@ -139,10 +139,12 @@ class Total:
     def __init__(self):
         self.duration: float = 0.0
         self.count: int = 0
+        self.count_status_true: int = 0
 
     def append(self, total):
         self.duration += total.duration
         self.count += total.count
+        self.count_status_true += total.count_status_true
 
 
 def get_items_by_type(data: Dict[ModelInfo, ModelData],
@@ -163,6 +165,7 @@ def get_sum_duration(data: Dict[ModelInfo, ModelData],
         total = Total()
         total.duration = sum((unit.get_duration_median() for unit in units))
         total.count = len(units)
+        total.count_status_true = sum((1 for unit in units if unit.status == '1'))
         result[name] = total
     return result
 
@@ -180,12 +183,13 @@ def get_sum_duration_all_csv(data: List[Dict[ModelInfo, ModelData]],
 
 def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
                      unit_type: str):
-    header = ['name', 'total duration (ms)', 'count of executions']
+    header = ['name', 'total duration (ms)', 'count of executions', 'count of status true']
     table = []
     for name, total in get_sum_duration_all_csv(data, unit_type).items():
         row = {'name': name,
                'total duration (ms)': total.duration / 1_000_000,
-               'count of executions': total.count}
+               'count of executions': total.count,
+               'count of status true': total.count_status_true}
         table.append(row)
     def get_duration(row: Dict) -> float:
         return row['total duration (ms)']
@@ -206,6 +210,12 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
             count = aggregated_data_item[name].count
         return count
 
+    def get_count_status_true(aggregated_data_item: Dict[str, Total], name: str) -> int:
+        count = 0
+        if name in aggregated_data_item:
+            count = aggregated_data_item[name].count_status_true
+        return count
+
     def create_header(n_csv_files: int):
         column_names = ['name']
         for i in range(n_csv_files):
@@ -218,6 +228,10 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
             column_names.append(f'count #{i + 1}')
         for i in range(1, n_csv_files):
             column_names.append(f'count #{i + 1} - #1')
+        for i in range(n_csv_files):
+            column_names.append(f'count status true #{i + 1}')
+        for i in range(1, n_csv_files):
+            column_names.append(f'count status true #{i + 1} - #1')
         return column_names
 
     def get_delta_header_names(n_csv_files: int) -> List[str]:
@@ -238,9 +252,11 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
         row = {'name' : name}
         durations = []
         counters = []
+        status_true_counters = []
         for csv_idx in range(n_csv_files):
             durations.append(get_duration(aggregated_data[csv_idx], name))
             counters.append(get_count(aggregated_data[csv_idx], name))
+            status_true_counters.append(get_count_status_true(aggregated_data[csv_idx], name))
 
         for csv_idx in range(n_csv_files):
             row[f'duration #{csv_idx + 1} (ms)'] = durations[csv_idx]
@@ -257,6 +273,11 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
         for csv_idx in range(1, n_csv_files):
             delta = counters[csv_idx] - counters[0]
             row[f'count #{csv_idx + 1} - #1'] = delta
+        for csv_idx in range(n_csv_files):
+            row[f'count status true #{csv_idx + 1}'] = status_true_counters[csv_idx]
+        for csv_idx in range(1, n_csv_files):
+            delta = status_true_counters[csv_idx] - status_true_counters[0]
+            row[f'count status true #{csv_idx + 1} - #1'] = delta
         table.append(row)
 
     comparison_values = get_comparison_values(table,

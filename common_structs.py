@@ -110,6 +110,7 @@ class Unit:
         assert self.type == csv_item.type
         assert self.transformation_name == csv_item.transformation_name
         assert self.manager_name == csv_item.manager_name
+        assert self.status == csv_item.status
         self.__durations.append(float(csv_item.duration))
         self.__duration_median = None
 
