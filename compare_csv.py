@@ -229,8 +229,6 @@ class CompareSumUnitsPerModel(DataProcessor):
             comparison_values_overall[model_info] = comparison_values
             with self.output_factory.create_table(header, model_info) as output:
                 output.write(table)
-            if self.__plot_output:
-                self.__plot_output.plot_for_model(model_info, comparison_values)
         progress_status.complete()
         if self.__summary_output_factory:
             header, table = create_comparison_summary_table(comparison_values_overall)

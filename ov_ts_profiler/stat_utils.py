@@ -84,12 +84,3 @@ def get_sum_units_durations_by_iteration(csv_data: List[Dict[ModelInfo, ModelDat
                      if data is not None)
         yield model_info, durations
 
-
-def find_iqr_outlier_indexes(values) -> Set[int]:
-    q1 = np.percentile(values, 25)
-    q3 = np.percentile(values, 75)
-    iqr = q3 - q1
-    lower_bound = q1 - 1.5 * iqr
-    upper_bound = q3 + 1.5 * iqr
-    indexes = (i for i, x in enumerate(values) if x < lower_bound or x > upper_bound)
-    return set(indexes)

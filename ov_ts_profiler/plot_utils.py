@@ -9,7 +9,6 @@ import numpy as np
 
 from ov_ts_profiler.common_structs import ModelInfo, ComparisonValues
 from ov_ts_profiler.output_utils import make_model_file_name
-from ov_ts_profiler.stat_utils import find_iqr_outlier_indexes
 
 PlotDots = namedtuple('PlotDots', ['x_values', 'y_values', 'label'])
 Stripe = namedtuple('Stripe', ['lower_bound', 'upper_bound', 'label'])
@@ -207,16 +206,32 @@ class PlotOutput:
         self.title_prefix = title_prefix
         self.n_segments = n_segments
 
-    def plot_for_model(self, model_info: ModelInfo, values: ComparisonValues):
-        prefix = make_model_file_name(self.path_prefix, model_info, '')
-        self.plot_into_file(values, prefix)
+    def plot_scatter(self, prefix: str, i: int, x_part: List[float], y_part: List[float], y_median: float, unit: str):
+        title = f'{self.title_prefix} scatter ratio part {i}'
+        scatter_path = f'{prefix}_scatter_part{i}.png'
+        y_label = f'ratio (value #2/value #1 - 1), %'
+        x_label = f'max (value #1, value #2), {unit}'
+
+        scatter = ScatterPlot(title, x_label, y_label)
+        scatter.set_values(x_part, y_part)
+        scatter.add_horizontal_line(y_median, f'median {y_median:.2f} %')
+        scatter.plot(scatter_path)
+
+    def plot_hist(self, prefix: str, i: int, y_part: List[float]):
+        title = f'{self.title_prefix} histogram ratio part {i}'
+        hist_path = f'{prefix}_hist_part{i}.png'
+        x_label = f'ratio (value #2/value #1 - 1), %'
+        y_label = f'number of values'
+
+        hist = Hist(title, x_label, y_label)
+        hist.set_values(y_part)
+        hist.plot(hist_path)
 
     def plot_into_file(self, values: ComparisonValues, prefix: str):
         ratios = values.get_ratios()
         max_values = values.get_max_values()
         assert len(ratios) == len(max_values)
 
-        ratio_outlier_indexes = find_iqr_outlier_indexes(ratios)
         log_numbers = np.log(max_values)
         min_log = np.min(log_numbers)
         max_log = np.max(log_numbers)
@@ -230,9 +245,6 @@ class PlotOutput:
             for j in range(len(max_values)):
                 if indices[j] != i:
                     continue
-                if j in ratio_outlier_indexes:
-                    n_outliers += 1
-                    continue
                 x_part.append(max_values[j])
                 y_part.append(ratios[j])
 
@@ -242,16 +254,9 @@ class PlotOutput:
             y_values = np.array(y_part)
             y_median = float(np.median(y_values))
 
-            outliers_percent = n_outliers / len(max_values) * 100.0
-            title = f'{self.title_prefix} ratio part {i} without outliers ({outliers_percent:.2f} %)'
-            scatter_path = f'{prefix}_scatter_part{i}.png'
+            self.plot_scatter(prefix, i, x_part, y_part, y_median, values.unit)
+            self.plot_hist(prefix, i, y_part)
 
-            y_label = f'ratio (value #2/value #1 - 1), %'
-            x_label = f'max (value #1, value #2), {values.unit}'
-            scatter = ScatterPlot(title, x_label, y_label)
-            scatter.set_values(x_part, y_part)
-            scatter.add_horizontal_line(y_median, f'median {y_median:.2f} %')
-            scatter.plot(scatter_path)
 
     def plot(self, values: ComparisonValues):
         self.plot_into_file(values, self.path_prefix)
@@ -297,8 +302,9 @@ def gen_plot_time_by_iterations(output_dir: str,
         upper_bound = median_value + deviation
         plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
 
-    path = os.path.join(output_dir, f'{file_prefix}_{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
+    path = os.path.join(output_dir, f'{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
     if model_info.config:
         path += f'_{model_info.config}'
+    path += f'_{file_prefix}'
     path += '.png'
     plot.plot(path)
