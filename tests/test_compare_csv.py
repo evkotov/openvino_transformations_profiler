@@ -9,7 +9,9 @@ from compare_csv import (CSVSingleFileOutputFactory, ConsoleTableSingleFileOutpu
                          ConsoleTableMultiOutputFactory, CompareCompileTime,
                          CompareSumTransformationTime, GenerateLongestUnitsOverall,
                          GenerateLongestUnitsPerModel, CompareSumUnitsOverall,
-                         CompareSumUnitsPerModel, PlotCompileTimeByIteration, PlotSumTSTimeByIteration)
+                         CompareSumUnitsPerModel, PlotCompileTimeByIteration, PlotSumTSTimeByIteration,
+                         parse_args, create_single_output_factory, SingleNoOutputFactory, Config,
+                         create_multi_output_factory, create_summary_output_factory)
 
 
 class TestCreateRatioStatsTable(unittest.TestCase):
@@ -686,6 +688,132 @@ class TestPlotSumTSTimeByIteration(unittest.TestCase):
         mock_get_device.assert_called_once_with(csv_data)
         mock_get_sum_units_durations_by_iteration.assert_called_once_with(csv_data, 'transformation')
         mock_gen_plot_time_by_iterations.assert_not_called()
+
+
+class TestParseArgs(unittest.TestCase):
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv'])
+    def test_parses_input_files_correctly(self):
+        config = parse_args()
+        self.assertEqual(config.inputs, ['/dir1/file1.csv', '/dir2/file2.csv'])
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--compare_compile_time'])
+    def test_sets_compare_compile_time_flag(self):
+        config = parse_args()
+        self.assertEqual(config.compare_compile_time, 'compile_time_comparison')
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--output_type', 'console'])
+    def test_sets_output_type_correctly(self):
+        config = parse_args()
+        self.assertEqual(config.output_type, 'console')
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--summary_statistics'])
+    def test_enables_summary_statistics(self):
+        config = parse_args()
+        self.assertTrue(config.summary_statistics)
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--plots'])
+    def test_enables_plots(self):
+        config = parse_args()
+        self.assertTrue(config.plots)
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--limit_output', '10'])
+    def test_sets_limit_output_correctly(self):
+        config = parse_args()
+        self.assertEqual(config.limit_output, 10)
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--model_name', 'llama-3-8b'])
+    def test_filters_by_model_name(self):
+        config = parse_args()
+        self.assertEqual(config.model_name, 'llama-3-8b')
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--no_csv'])
+    def test_disables_csv_output(self):
+        config = parse_args()
+        self.assertTrue(config.no_csv)
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--n_plot_segments', '3'])
+    def test_sets_number_of_plot_segments(self):
+        config = parse_args()
+        self.assertEqual(config.n_plot_segments, 3)
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--plot_compile_time_by_iteration'])
+    def test_enables_plot_compile_time_by_iteration(self):
+        config = parse_args()
+        self.assertTrue(config.plot_compile_time_by_iteration)
+
+    @patch('compare_csv.sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--plot_sum_ts_time_by_iteration'])
+    def test_enables_plot_sum_ts_time_by_iteration(self):
+        config = parse_args()
+        self.assertTrue(config.plot_sum_ts_time_by_iteration)
+
+
+class TestCreateSingleOutputFactory(unittest.TestCase):
+
+    def test_creates_no_output_factory_when_no_csv(self):
+        config = Config(no_csv=True)
+        factory = create_single_output_factory(config, 'path_prefix', 'description')
+        self.assertIsInstance(factory, SingleNoOutputFactory)
+
+    def test_creates_csv_output_factory_when_output_type_is_csv(self):
+        config = Config(no_csv=False)
+        factory = create_single_output_factory(config, 'path_prefix', 'description')
+        self.assertIsInstance(factory, CSVSingleFileOutputFactory)
+        self.assertEqual(factory.path_prefix, 'path_prefix')
+        self.assertEqual(factory.limit_output, config.limit_output)
+
+    def test_creates_console_output_factory_when_output_type_is_console(self):
+        config = Config(no_csv=False)
+        config.output_type = 'console'
+        factory = create_single_output_factory(config, 'path_prefix', 'description')
+        self.assertIsInstance(factory, ConsoleTableSingleFileOutputFactory)
+        self.assertEqual(factory.description, 'description')
+        self.assertEqual(factory.limit_output, config.limit_output)
+
+
+class TestCreateMultiOutputFactory(unittest.TestCase):
+
+    def test_creates_no_output_factory_when_no_csv(self):
+        config = Config(no_csv=True)
+        config.output_type = 'csv'
+        config.limit_output = 10
+        factory = create_multi_output_factory(config, 'prefix', 'description')
+        self.assertIsInstance(factory, MultiFileNoOutputFactory)
+
+    def test_creates_csv_output_factory_when_output_type_is_csv(self):
+        config = Config(no_csv=False)
+        config.output_type = 'csv'
+        config.limit_output = 10
+        factory = create_multi_output_factory(config, 'prefix', 'description')
+        self.assertIsInstance(factory, CSVMultiFileOutputFactory)
+        self.assertEqual(factory.prefix, 'prefix')
+        self.assertEqual(factory.limit_output, 10)
+
+    def test_creates_console_output_factory_when_output_type_is_console(self):
+        config = Config(no_csv=False)
+        config.output_type = 'console'
+        config.limit_output = 5
+        factory = create_multi_output_factory(config, 'prefix', 'description')
+        self.assertIsInstance(factory, ConsoleTableMultiOutputFactory)
+        self.assertEqual(factory.description, 'description')
+        self.assertEqual(factory.limit_output, 5)
+
+
+import unittest
+
+class TestCreateSummaryOutputFactory(unittest.TestCase):
+
+    def test_creates_csv_summary_output_factory(self):
+        factory = create_summary_output_factory('csv', 'prefix', 'description')
+        self.assertIsInstance(factory, CSVSingleFileOutputFactory)
+        self.assertEqual(factory.path_prefix, 'prefix_summary')
+        self.assertIsNone(factory.limit_output)
+
+    def test_creates_console_summary_output_factory(self):
+        factory = create_summary_output_factory('console', 'prefix', 'description')
+        self.assertIsInstance(factory, ConsoleTableSingleFileOutputFactory)
+        self.assertEqual(factory.description, 'description')
+        self.assertIsNone(factory.limit_output)
 
 
 if __name__ == "__main__":
