@@ -227,6 +227,8 @@ class ComparisonValues:
         self.unit: str = unit
 
     def add(self, value1: float, value2: float):
+        if value1 is None or value2 is None:
+            return
         self.values1.append(value1)
         self.values2.append(value2)
 
@@ -241,11 +243,11 @@ class ComparisonValues:
 
     @staticmethod
     def get_stat_values(values: np.array):
-        median = np.median(values)
-        mean = np.mean(values)
-        std = np.std(values)
+        median = float(np.median(values))
+        mean = float(np.mean(values))
+        std = float(np.std(values))
         maximum = max(values, key=abs)
-        return median, mean, std, maximum
+        return median, mean, std, float(maximum)
 
     def get_stats(self) -> SummaryStats:
         assert len(self.values1) == len(self.values2)
@@ -258,10 +260,10 @@ class ComparisonValues:
 
 
 def full_join_by_model_info(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[
-    ModelInfo, Iterator[Optional[ModelData]]]]:
+    ModelInfo, List[Optional[ModelData]]]]:
     keys = set(info for data_item in data for info in data_item)
-    for model_info in keys:
-        items = (item[model_info] if model_info in item else None for item in data)
+    for model_info in sorted(keys):
+        items = [item[model_info] if model_info in item else None for item in data]
         yield model_info, items
 
 

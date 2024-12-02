@@ -1,22 +1,10 @@
 from __future__ import annotations
-from typing import List, Dict, Tuple
-from ov_ts_profiler.common_structs import ModelInfo, ModelData, ComparisonValues, full_join_by_model_info
+from typing import List, Dict, Tuple, Optional
+from ov_ts_profiler.common_structs import ModelInfo, ModelData, ComparisonValues, Unit
+from ov_ts_profiler.stat_utils import Total
 
 
-def get_comparison_values(table: List[Dict], key1: str, key2: str, unit: str):
-    comparison_values = ComparisonValues(unit)
-    for row in table:
-        value1 = row[key1]
-        value2 = row[key2]
-        if isinstance(value1, float) and isinstance(value2, float):
-            comparison_values.add(value1, value2)
-    return comparison_values
-
-
-def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
-    if len(data) == 0:
-        return [], []
-
+def compare_compile_time(data: List[Tuple[ModelInfo, List[Optional[float]]]], n_csv_files: int):
     def create_header(n_csv_files: int):
         column_names = ['framework',
                         'name',
@@ -36,48 +24,36 @@ def compare_compile_time(data: List[Dict[ModelInfo, ModelData]]):
             column_names.append(f'compile time #{csv_idx + 1} - #1 (secs)')
         return column_names
 
-
-    n_cvs_files = len(data)
-    header = create_header(n_cvs_files)
+    header = create_header(n_csv_files)
     table = []
-    for model_info, model_data_items in full_join_by_model_info(data):
+    for model_info, compile_times in data:
         row = {'framework': model_info.framework,
                'name': model_info.name,
                'precision': model_info.precision,
                'config': model_info.config}
-        compile_times = [model_data.get_compile_time() / 1_000_000_000 if model_data is not None else None
-                         for model_data in model_data_items]
-        for csv_idx in range(n_cvs_files):
+        for csv_idx in range(n_csv_files):
             value = compile_times[csv_idx] if compile_times[csv_idx] is not None else 'N/A'
             row[f'compile time #{csv_idx + 1} (secs)'] = value
-        for csv_idx in range(1, n_cvs_files):
+        for csv_idx in range(1, n_csv_files):
             delta = 'N/A'
             if compile_times[0] is not None and compile_times[csv_idx] is not None:
                 delta = compile_times[csv_idx] - compile_times[0]
             row[f'compile time #{csv_idx + 1} - #1 (secs)'] = delta
-        for csv_idx in range(1, n_cvs_files):
+        for csv_idx in range(1, n_csv_files):
             ratio = 'N/A'
             if compile_times[0] is not None and compile_times[csv_idx] is not None and compile_times[0] != 0.0:
                 ratio = compile_times[csv_idx] / compile_times[0]
             row[f'compile time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
 
-    comparison_values = get_comparison_values(table,
-                                              'compile time #1 (secs)',
-                                              'compile time #2 (secs)',
-                                              'sec')
-
-    delta_header_names = get_delta_header_names(n_cvs_files)
+    delta_header_names = get_delta_header_names(n_csv_files)
     def get_max_delta(row: Dict) -> float:
         return max((abs(row[key]) for key in delta_header_names if isinstance(row[key], float)),
                    default=None)
-    return header, sort_table(table, get_max_delta), comparison_values
+    return header, sort_table(table, get_max_delta)
 
 
-def compare_sum_transformation_time(data: List[Dict[ModelInfo, ModelData]]):
-    if len(data) == 0:
-        return [], []
-
+def compare_sum_transformation_time(data: List[Tuple[ModelInfo, List[Optional[float]]]], n_csv_files: int):
     def create_header(n_csv_files: int):
         column_names = ['framework',
                         'name',
@@ -98,94 +74,39 @@ def compare_sum_transformation_time(data: List[Dict[ModelInfo, ModelData]]):
         return column_names
 
 
-    n_cvs_files = len(data)
-    header = create_header(n_cvs_files)
+    header = create_header(n_csv_files)
     table = []
-    for model_info, model_data_items in full_join_by_model_info(data):
+    for model_info, compile_times in data:
         row = {'framework': model_info.framework,
                'name': model_info.name,
                'precision': model_info.precision,
                'config': model_info.config}
-        compile_times = [model_data.sum_transformation_time() / 1_000_000 if model_data is not None else None
-                         for model_data in model_data_items]
-        for csv_idx in range(n_cvs_files):
+        for csv_idx in range(n_csv_files):
             value = compile_times[csv_idx] if compile_times[csv_idx] is not None else 'N/A'
             row[f'time #{csv_idx + 1} (ms)'] = value
-        for csv_idx in range(1, n_cvs_files):
+        for csv_idx in range(1, n_csv_files):
             delta = 'N/A'
             if compile_times[0] is not None and compile_times[csv_idx] is not None:
                 delta = compile_times[csv_idx] - compile_times[0]
             row[f'time #{csv_idx + 1} - #1 (ms)'] = delta
-        for csv_idx in range(1, n_cvs_files):
+        for csv_idx in range(1, n_csv_files):
             ratio = 'N/A'
             if compile_times[0] is not None and compile_times[csv_idx] is not None and compile_times[0] != 0.0:
                 ratio = compile_times[csv_idx] / compile_times[0]
             row[f'time #{csv_idx + 1}/#1'] = ratio
         table.append(row)
 
-    comparison_values = get_comparison_values(table,
-                                              'time #1 (ms)',
-                                              'time #2 (ms)',
-                                              'ms')
-
-    delta_header_names = get_delta_header_names(n_cvs_files)
+    delta_header_names = get_delta_header_names(n_csv_files)
     def get_max_delta(row: Dict) -> float:
         return max((abs(row[key]) for key in delta_header_names if isinstance(row[key], float)),
                    default=None)
-    return header, sort_table(table, get_max_delta), comparison_values
+    return header, sort_table(table, get_max_delta)
 
 
-class Total:
-    def __init__(self):
-        self.duration: float = 0.0
-        self.count: int = 0
-        self.count_status_true: int = 0
-
-    def append(self, total):
-        self.duration += total.duration
-        self.count += total.count
-        self.count_status_true += total.count_status_true
-
-
-def get_items_by_type(data: Dict[ModelInfo, ModelData],
-                      unit_type: str) -> Dict[str, List[Unit]]:
-    result: Dict[str, List[Unit]] = {}
-    for model_info, model_data in data.items():
-        for name, units in model_data.collect_items_by_type(unit_type).items():
-            if name not in result:
-                result[name] = []
-            result[name].extend(units)
-    return result
-
-
-def get_sum_duration(data: Dict[ModelInfo, ModelData],
-                     unit_type: str) -> Dict[str, Total]:
-    result: Dict[str, Total] = {} # ts name: Total
-    for name, units in get_items_by_type(data, unit_type).items():
-        total = Total()
-        total.duration = sum((unit.get_duration_median() for unit in units))
-        total.count = len(units)
-        total.count_status_true = sum((1 for unit in units if unit.status == '1'))
-        result[name] = total
-    return result
-
-
-def get_sum_duration_all_csv(data: List[Dict[ModelInfo, ModelData]],
-                             unit_type: str):
-    result: Dict[str, Total] = {} # ts name: Total
-    for csv_item in data:
-        for name, total in get_sum_duration(csv_item, unit_type).items():
-            if name not in result:
-                result[name] = Total()
-            result[name].append(total)
-    return result
-
-
-def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
-                     unit_type: str):
+def get_longest_unit(data: Dict[str, Total]):
     header = ['name', 'total duration (ms)', 'count of executions', 'count of status true']
     table = []
-    for name, total in get_sum_duration_all_csv(data, unit_type).items():
+    for name, total in data.items():
         row = {'name': name,
                'total duration (ms)': total.duration / 1_000_000,
                'count of executions': total.count,
@@ -196,26 +117,7 @@ def get_longest_unit(data: List[Dict[ModelInfo, ModelData]],
     return header, sort_table(table, get_duration)
 
 
-def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
-                      unit_type: str):
-    def get_duration(aggregated_data_item: Dict[str, Total], name: str) -> float:
-        duration = 0.0
-        if name in aggregated_data_item:
-            duration = aggregated_data_item[name].duration / 1_000_000
-        return duration
-
-    def get_count(aggregated_data_item: Dict[str, Total], name: str) -> int:
-        count = 0
-        if name in aggregated_data_item:
-            count = aggregated_data_item[name].count
-        return count
-
-    def get_count_status_true(aggregated_data_item: Dict[str, Total], name: str) -> int:
-        count = 0
-        if name in aggregated_data_item:
-            count = aggregated_data_item[name].count_status_true
-        return count
-
+def compare_sum_units(data: Dict[str, List[Optional[Total]]], n_csv_files: int):
     def create_header(n_csv_files: int):
         column_names = ['name']
         for i in range(n_csv_files):
@@ -240,60 +142,57 @@ def compare_sum_units(data: List[Dict[ModelInfo, ModelData]],
             column_names.append(f'duration #{csv_idx + 1} - #1 (ms)')
         return column_names
 
-    n_csv_files = len(data)
-
     table = []
 
-    aggregated_data = [get_sum_duration(csv_data, unit_type) for csv_data in data]
-    transformation_names = set(ts_name for aggregated_data_item in aggregated_data
-                              for ts_name in aggregated_data_item)
-
-    for name in transformation_names:
+    for name, totals in data.items():
         row = {'name' : name}
-        durations = []
-        counters = []
-        status_true_counters = []
-        for csv_idx in range(n_csv_files):
-            durations.append(get_duration(aggregated_data[csv_idx], name))
-            counters.append(get_count(aggregated_data[csv_idx], name))
-            status_true_counters.append(get_count_status_true(aggregated_data[csv_idx], name))
 
         for csv_idx in range(n_csv_files):
-            row[f'duration #{csv_idx + 1} (ms)'] = durations[csv_idx]
+            duration = totals[csv_idx].get_duration_ms() if totals[csv_idx] is not None else 'N/A'
+            row[f'duration #{csv_idx + 1} (ms)'] = duration
         for csv_idx in range(1, n_csv_files):
-            delta = durations[csv_idx] - durations[0]
+            if totals[0] is None or totals[csv_idx] is None:
+                delta = 'N/A'
+            else:
+                delta = totals[csv_idx].get_duration_ms() - totals[0].get_duration_ms()
             row[f'duration #{csv_idx + 1} - #1 (ms)'] = delta
         for csv_idx in range(1, n_csv_files):
-            ratio = 'N/A'
-            if durations[0] != 0.0:
-                ratio = durations[csv_idx]/durations[0]
+            if totals[0] is None or totals[csv_idx] is None or totals[0].get_duration_ms() == 0.0:
+                ratio = 'N/A'
+            else:
+                ratio = totals[csv_idx].get_duration_ms() / totals[0].get_duration_ms()
             row[f'duration #{csv_idx + 1}/#1'] = ratio
         for csv_idx in range(n_csv_files):
-            row[f'count #{csv_idx + 1}'] = counters[csv_idx]
+            count = totals[csv_idx].count if totals[csv_idx] is not None else 'N/A'
+            row[f'count #{csv_idx + 1}'] = count
         for csv_idx in range(1, n_csv_files):
-            delta = counters[csv_idx] - counters[0]
+            if totals[0] is None or totals[csv_idx] is None:
+                delta = 'N/A'
+            else:
+                delta = totals[csv_idx].count - totals[0].count
             row[f'count #{csv_idx + 1} - #1'] = delta
         for csv_idx in range(n_csv_files):
-            row[f'count status true #{csv_idx + 1}'] = status_true_counters[csv_idx]
+            count_status_true = totals[csv_idx].count_status_true if totals[csv_idx] is not None else 'N/A'
+            row[f'count status true #{csv_idx + 1}'] = count_status_true
         for csv_idx in range(1, n_csv_files):
-            delta = status_true_counters[csv_idx] - status_true_counters[0]
+            if totals[0] is None or totals[csv_idx] is None:
+                delta = 'N/A'
+            else:
+                delta = totals[csv_idx].count_status_true - totals[0].count_status_true
             row[f'count status true #{csv_idx + 1} - #1'] = delta
         table.append(row)
-
-    comparison_values = get_comparison_values(table,
-                                              'duration #1 (ms)',
-                                              'duration #2 (ms)',
-                                              'ms')
 
     header = create_header(n_csv_files)
 
     delta_header_names = get_delta_header_names(n_csv_files)
     def get_max_delta(row: Dict) -> float:
-        return max((abs(row[key]) for key in delta_header_names))
-    return header, sort_table(table, get_max_delta), comparison_values
+        return max((abs(row[key]) if isinstance(row[key], float) else 0.0 for key in delta_header_names))
+    return header, sort_table(table, get_max_delta)
 
 
 def create_comparison_summary_table(data: Dict[ModelInfo, ComparisonValues]):
+    if not data:
+        return [], []
     unit = data[next(iter(data))].unit
     column_names = ['framework', 'name', 'precision',
                     'config',

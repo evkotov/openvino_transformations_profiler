@@ -10,8 +10,12 @@ from ov_ts_profiler.output_utils import print_summary_stats, make_model_file_nam
 from ov_ts_profiler.parse_input import get_csv_data, get_input_csv_files
 from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description
 from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations
-from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, filter_common_models, get_device, get_all_models, \
-    compile_time_by_iterations, get_sum_units_durations_by_iteration
+from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, filter_common_models, get_device, \
+    get_all_models, \
+    compile_time_by_iterations, get_sum_units_durations_by_iteration, get_compile_time_data, \
+    get_sum_transformation_time_data, get_sum_units_comparison_data, join_sum_units, join_sum_units_by_name, \
+    get_comparison_values_compile_time, get_comparison_values_sum_transformation_time, \
+    get_comparison_values_sum_units
 from ov_ts_profiler.table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
     create_comparison_summary_table
 
@@ -112,10 +116,14 @@ class CompareCompileTime(DataProcessor):
         if not csv_data:
             print('no common models to compare compilation time ...')
             return
-        header, table, comparison_values = compare_compile_time(csv_data)
+        n_csv_files = len(csv_data)
+        compile_time_data = list(get_compile_time_data(csv_data))
+        header, table = compare_compile_time(compile_time_data, n_csv_files)
         if self.__summary_stats:
+            comparison_values = get_comparison_values_compile_time(compile_time_data)
             print_summary_stats(comparison_values)
         if self.__plot_output:
+            comparison_values = get_comparison_values_compile_time(compile_time_data)
             self.__plot_output.plot(comparison_values)
         with self.output_factory.create_table(header) as output:
             output.write(table)
@@ -133,10 +141,14 @@ class CompareSumTransformationTime(DataProcessor):
         if not csv_data:
             print('no common models to compare compilation time ...')
             return
-        header, table, comparison_values = compare_sum_transformation_time(csv_data)
+        n_csv_files = len(csv_data)
+        sum_ts_data = list(get_sum_transformation_time_data(csv_data))
+        header, table = compare_sum_transformation_time(sum_ts_data, n_csv_files)
         if self.__summary_stats:
+            comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
             print_summary_stats(comparison_values)
         if self.__plot_output:
+            comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
             self.__plot_output.plot(comparison_values)
         with self.output_factory.create_table(header) as output:
             output.write(table)
@@ -149,7 +161,10 @@ class GenerateLongestUnitsOverall(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} overall data ...')
-        header, table = get_longest_unit(csv_data, self.unit_type)
+        sum_units_data = get_sum_units_comparison_data(csv_data, self.unit_type)
+        sum_units_data_all = join_sum_units(sum_units_data)
+        sum_units_by_name = join_sum_units_by_name(sum_units_data_all)
+        header, table = get_longest_unit(sum_units_by_name)
         with self.output_factory.create_table(header) as output:
             output.write(table)
 
@@ -162,7 +177,11 @@ class GenerateLongestUnitsPerModel(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} per model data ...')
         for model_info in get_all_models(csv_data):
-            header, table = get_longest_unit(filter_by_models(csv_data, [model_info]), self.unit_type)
+            model_data = filter_by_models(csv_data, [model_info])
+            sum_units_data = get_sum_units_comparison_data(csv_data, self.unit_type)
+            sum_units_data_all = join_sum_units(sum_units_data)
+            sum_units_by_name = join_sum_units_by_name(sum_units_data_all)
+            header, table = get_longest_unit(sum_units_by_name)
             with self.output_factory.create_table(header, model_info) as output:
                 output.write(table)
 
@@ -178,33 +197,18 @@ class CompareSumUnitsOverall(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} overall data ...')
         csv_data_common_models = filter_common_models(csv_data)
-        header, table, comparison_values = compare_sum_units(csv_data_common_models, self.unit_type)
+        n_csv_files = len(csv_data)
+        sum_units_data = get_sum_units_comparison_data(csv_data_common_models, self.unit_type)
+        sum_units_data_all = join_sum_units(sum_units_data)
+        header, table, comparison_values = compare_sum_units(sum_units_data_all, n_csv_files)
         if self.__summary_stats:
+            comparison_values = get_comparison_values_sum_units(sum_units_data_all)
             print_summary_stats(comparison_values)
         if self.__plot_output:
+            comparison_values = get_comparison_values_sum_units(sum_units_data_all)
             self.__plot_output.plot(comparison_values)
         with self.output_factory.create_table(header) as output:
             output.write(table)
-
-
-class ProgressStatus:
-    def __init__(self, total_iterations: int):
-        self.total_iterations = total_iterations
-        self.current_iteration = 0
-        self.last_length = 0
-
-    def update(self, status: str):
-        self.current_iteration += 1
-        percent_complete = (self.current_iteration / self.total_iterations) * 100
-        message = f'Progress: {percent_complete:.2f}% - {status}'
-        sys.stdout.write('\r' + ' ' * self.last_length)
-        sys.stdout.write('\r' + message)
-        sys.stdout.flush()
-        self.last_length = len(message)
-
-    def complete(self):
-        sys.stdout.write('\n')
-        sys.stdout.flush()
 
 
 class CompareSumUnitsPerModel(DataProcessor):
@@ -218,18 +222,18 @@ class CompareSumUnitsPerModel(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} per model data ...')
+        n_csv_files = len(csv_data)
         csv_data_common_models = filter_common_models(csv_data)
         comparison_values_overall = {}
         models = get_all_models(csv_data_common_models)
-        progress_status = ProgressStatus(len(models))
         for model_info in models:
-            progress_status.update(f'{model_info.framework} {model_info.name} {model_info.precision} {model_info.config}')
-            header, table, comparison_values = compare_sum_units(filter_by_models(csv_data, [model_info]),
-                                                                 self.unit_type)
-            comparison_values_overall[model_info] = comparison_values
+            model_data = filter_by_models(csv_data_common_models, [model_info])
+            sum_units_data = get_sum_units_comparison_data(model_data, self.unit_type)
+            sum_units_data_all = join_sum_units(sum_units_data)
+            header, table = compare_sum_units(sum_units_data_all, n_csv_files)
             with self.output_factory.create_table(header, model_info) as output:
                 output.write(table)
-        progress_status.complete()
+            comparison_values_overall[model_info] = get_comparison_values_sum_units(sum_units_data_all)
         if self.__summary_output_factory:
             header, table = create_comparison_summary_table(comparison_values_overall)
             with self.__summary_output_factory.create_table(header) as output:
