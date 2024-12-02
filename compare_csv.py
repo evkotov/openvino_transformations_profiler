@@ -119,14 +119,14 @@ class CompareCompileTime(DataProcessor):
         n_csv_files = len(csv_data)
         compile_time_data = list(get_compile_time_data(csv_data))
         header, table = compare_compile_time(compile_time_data, n_csv_files)
-        if self.__summary_stats:
-            comparison_values = get_comparison_values_compile_time(compile_time_data)
-            print_summary_stats(comparison_values)
-        if self.__plot_output:
-            comparison_values = get_comparison_values_compile_time(compile_time_data)
-            self.__plot_output.plot(comparison_values)
         with self.output_factory.create_table(header) as output:
             output.write(table)
+
+        comparison_values = get_comparison_values_compile_time(compile_time_data)
+        if self.__summary_stats:
+            print_summary_stats(comparison_values)
+        if self.__plot_output:
+            self.__plot_output.plot(comparison_values)
 
 
 class CompareSumTransformationTime(DataProcessor):
@@ -144,14 +144,14 @@ class CompareSumTransformationTime(DataProcessor):
         n_csv_files = len(csv_data)
         sum_ts_data = list(get_sum_transformation_time_data(csv_data))
         header, table = compare_sum_transformation_time(sum_ts_data, n_csv_files)
-        if self.__summary_stats:
-            comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
-            print_summary_stats(comparison_values)
-        if self.__plot_output:
-            comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
-            self.__plot_output.plot(comparison_values)
         with self.output_factory.create_table(header) as output:
             output.write(table)
+
+        comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
+        if self.__summary_stats:
+            print_summary_stats(comparison_values)
+        if self.__plot_output:
+            self.__plot_output.plot(comparison_values)
 
 
 class GenerateLongestUnitsOverall(DataProcessor):
@@ -161,6 +161,9 @@ class GenerateLongestUnitsOverall(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} overall data ...')
+        if not csv_data:
+            print('no models to get longest units overall ...')
+            return
         sum_units_data = get_sum_units_comparison_data(csv_data, self.unit_type)
         sum_units_data_all = join_sum_units(sum_units_data)
         sum_units_by_name = join_sum_units_by_name(sum_units_data_all)
@@ -176,6 +179,9 @@ class GenerateLongestUnitsPerModel(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} per model data ...')
+        if not csv_data:
+            print('no models to get aggregate longest units per model ...')
+            return
         for model_info in get_all_models(csv_data):
             model_data = filter_by_models(csv_data, [model_info])
             sum_units_data = get_sum_units_comparison_data(csv_data, self.unit_type)
@@ -196,6 +202,9 @@ class CompareSumUnitsOverall(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} overall data ...')
+        if not csv_data:
+            print('no models to get sum units overall ...')
+            return
         csv_data_common_models = filter_common_models(csv_data)
         n_csv_files = len(csv_data)
         sum_units_data = get_sum_units_comparison_data(csv_data_common_models, self.unit_type)
@@ -222,6 +231,9 @@ class CompareSumUnitsPerModel(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} per model data ...')
+        if not csv_data:
+            print('no models to get sum units ...')
+            return
         n_csv_files = len(csv_data)
         csv_data_common_models = filter_common_models(csv_data)
         comparison_values_overall = {}
