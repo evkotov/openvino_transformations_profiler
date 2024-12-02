@@ -142,11 +142,26 @@ class CompareCompileTime(DataProcessor):
             print_summary_stats(comparison_values)
 
 
+class PlotCompareSumTransformationTime(DataProcessor):
+    def __init__(self, plot_output: PlotOutput):
+        super().__init__(None)
+        self.__plot_output = plot_output
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing sum transformation time plot ...')
+        # CSV files can store different models info
+        if not csv_data:
+            print('no data to plot compilation time comparison ...')
+            return
+        sum_ts_data = list(get_sum_transformation_time_data(csv_data))
+        comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
+        self.__plot_output.plot(comparison_values)
+
+
 class CompareSumTransformationTime(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory, summary_stats: bool, plot_output: Optional[PlotOutput]):
+    def __init__(self, output_factory: SingleOutputFactory, summary_stats: bool):
         super().__init__(output_factory)
         self.__summary_stats = summary_stats
-        self.__plot_output = plot_output
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing sum transformation time ...')
@@ -160,11 +175,9 @@ class CompareSumTransformationTime(DataProcessor):
         with self.output_factory.create_table(header) as output:
             output.write(table)
 
-        comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
         if self.__summary_stats:
+            comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
             print_summary_stats(comparison_values)
-        if self.__plot_output:
-            self.__plot_output.plot(comparison_values)
 
 
 class GenerateLongestUnitsOverall(DataProcessor):
@@ -316,6 +329,7 @@ class Config:
     plot_compile_time_by_iteration: bool = False
     plot_sum_ts_time_by_iteration: bool = False
     plot_compare_compile_time: bool = False
+    plot_compare_sum_transformation_time: bool = False
 
 
 def parse_args() -> Config:
@@ -506,6 +520,9 @@ Number of plot segments. Is useful with --plots option
 Plot graph with Y - compilation time and X - iteration number
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_compile_time_by_iteration
 ''')
+    args_parser.add_argument('--plot_compare_sum_transformation_time', nargs='?', type=str, default=None,
+                             const='transformation_sum_time_comparison',
+                             help='compare sum transformation time between input files; for common models between inputs')
     args_parser.add_argument('--plot_sum_ts_time_by_iteration', action='store_true',
                              help=f'''
 Plot graph with Y - sum transformation time and X - iteration number
@@ -554,6 +571,8 @@ Plot graph with Y - sum transformation time and X - iteration number
         config.plot_sum_ts_time_by_iteration = True
     if args.plot_compare_compile_time:
         config.plot_compare_compile_time = True
+    if args.plot_compare_sum_transformation_time:
+        config.plot_compare_sum_transformation_time = True
 
     return config
 
@@ -601,15 +620,16 @@ def build_data_processors(config):
         output_factory = create_single_output_factory(config,
                                                       config.compare_sum_transformation_time,
                                                       'sum transformation time')
-        plot_output_factory = None
-        if config.plots:
-            path_prefix = config.compare_sum_transformation_time
-            if not path_prefix:
-                path_prefix = 'sum_ts'
-            title_prefix = 'sum transformation time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
-        data_processors.append(CompareSumTransformationTime(output_factory, config.summary_statistics,
-                                                            plot_output_factory))
+        data_processors.append(CompareSumTransformationTime(output_factory, config.summary_statistics))
+
+    if config.plot_compare_sum_transformation_time:
+        path_prefix = config.compare_sum_transformation_time
+        if not path_prefix:
+            path_prefix = 'sum_ts'
+        title_prefix = 'sum transformation time'
+        plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
+        data_processors.append(PlotCompareSumTransformationTime(plot_output_factory))
+
     if config.transformations_overall:
         output_factory = create_single_output_factory(config,
                                                       config.transformations_overall,

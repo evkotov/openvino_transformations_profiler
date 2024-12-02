@@ -12,7 +12,7 @@ from compare_csv import (CSVSingleFileOutputFactory, ConsoleTableSingleFileOutpu
                          CompareSumUnitsPerModel, PlotCompileTimeByIteration, PlotSumTSTimeByIteration,
                          parse_args, create_single_output_factory, SingleNoOutputFactory, Config,
                          create_multi_output_factory, create_summary_output_factory, build_data_processors,
-                         PlotCompareCompileTime)
+                         PlotCompareCompileTime, PlotCompareSumTransformationTime)
 
 
 class TestCreateRatioStatsTable(unittest.TestCase):
@@ -343,8 +343,7 @@ class TestCompareSumTransformationTime(unittest.TestCase):
         mock_compare_sum_transformation_time.return_value = (MagicMock(), MagicMock())
         mock_get_comparison_values_sum_transformation_time.return_value = MagicMock()
         mock_output_factory = MagicMock()
-        mock_plot_output = MagicMock()
-        processor = CompareSumTransformationTime(mock_output_factory, True, mock_plot_output)
+        processor = CompareSumTransformationTime(mock_output_factory, True)
         csv_data = [MagicMock()]
 
         processor.run(csv_data)
@@ -353,14 +352,13 @@ class TestCompareSumTransformationTime(unittest.TestCase):
         mock_compare_sum_transformation_time.assert_called_once()
         mock_get_comparison_values_sum_transformation_time.assert_called_once()
         mock_print_summary_stats.assert_called_once()
-        mock_plot_output.plot.assert_called_once()
 
     @patch('compare_csv.get_sum_transformation_time_data')
     @patch('compare_csv.compare_sum_transformation_time')
     def test_comparing_sum_transformation_time_without_data(self, mock_compare_sum_transformation_time, mock_get_sum_transformation_time_data):
         mock_get_sum_transformation_time_data.return_value = []
         mock_output_factory = MagicMock()
-        processor = CompareSumTransformationTime(mock_output_factory, False, None)
+        processor = CompareSumTransformationTime(mock_output_factory, False)
         csv_data = []
 
         processor.run(csv_data)
@@ -370,21 +368,19 @@ class TestCompareSumTransformationTime(unittest.TestCase):
         mock_output_factory.create_table.assert_not_called()
 
     @patch('compare_csv.get_sum_transformation_time_data')
-    @patch('compare_csv.get_comparison_values_sum_transformation_time')
     @patch('compare_csv.print_summary_stats')
     @patch('compare_csv.compare_sum_transformation_time')
-    def test_comparing_sum_transformation_time_without_summary_stats(self, mock_compare_sum_transformation_time, mock_print_summary_stats, mock_get_comparison_values_sum_transformation_time, mock_get_sum_transformation_time_data):
+    def test_comparing_sum_transformation_time_without_summary_stats(self, mock_compare_sum_transformation_time, mock_print_summary_stats, mock_get_sum_transformation_time_data):
         mock_get_sum_transformation_time_data.return_value = [(MagicMock(), MagicMock())]
         mock_compare_sum_transformation_time.return_value = (MagicMock(), MagicMock())
         mock_output_factory = MagicMock()
-        processor = CompareSumTransformationTime(mock_output_factory, False, None)
+        processor = CompareSumTransformationTime(mock_output_factory, False)
         csv_data = [MagicMock()]
 
         processor.run(csv_data)
 
         mock_get_sum_transformation_time_data.assert_called_once_with(csv_data)
         mock_compare_sum_transformation_time.assert_called_once()
-        mock_get_comparison_values_sum_transformation_time.assert_called_once()
         mock_print_summary_stats.assert_not_called()
         mock_output_factory.create_table.assert_called_once()
 
@@ -965,6 +961,41 @@ class TestPlotCompareCompileTime(unittest.TestCase):
         csv_data = []
         data_processor.run(csv_data)
         mock_plot_output_instance.plot.assert_not_called()
+
+
+class TestBuildDataProcessors(unittest.TestCase):
+
+    @patch('compare_csv.PlotOutput')
+    def test_plot_compare_sum_transformation_time_creates_plot_output(self, mock_plot_output):
+        config = Config()
+        config.plot_compare_sum_transformation_time = True
+        config.compare_sum_transformation_time = None
+        config.n_plot_segments = 3
+
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], PlotCompareSumTransformationTime)
+        mock_plot_output.assert_called_once_with('sum_ts', 'sum transformation time', 3)
+
+    @patch('compare_csv.PlotOutput')
+    def test_plot_compare_sum_transformation_time_uses_provided_prefix(self, mock_plot_output):
+        config = Config()
+        config.plot_compare_sum_transformation_time = True
+        config.n_plot_segments = 3
+
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], PlotCompareSumTransformationTime)
+        mock_plot_output.assert_called_once_with('sum_ts', 'sum transformation time', 3)
+
+    @patch('compare_csv.PlotOutput')
+    def test_plot_compare_sum_transformation_time_no_data_processors_when_disabled(self, mock_plot_output):
+        config = Config()
+        config.plot_compare_sum_transformation_time = False
+
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 0)
+        mock_plot_output.assert_not_called()
 
 
 if __name__ == "__main__":
