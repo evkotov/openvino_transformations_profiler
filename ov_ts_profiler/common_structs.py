@@ -164,9 +164,12 @@ class ModelData:
             result[item.name].append(item)
         return result
 
-    def get_compile_time(self) -> float:
-        item = next(self.get_units_with_type('compile_time'))
-        return item.get_duration_median()
+    def get_compile_time(self) -> Optional[float]:
+        try:
+            item = next(self.get_units_with_type('compile_time'))
+            return item.get_duration_median()
+        except StopIteration:
+            return None
 
     def sum_transformation_time(self) -> float:
         units = self.get_units_with_type('transformation')

@@ -88,10 +88,11 @@ def get_sum_units_durations_by_iteration(csv_data: List[Dict[ModelInfo, ModelDat
 # return compilation time in seconds
 def get_compile_time_data(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
     for model_info, model_data_items in full_join_by_model_info(data):
-        compile_times = [model_data.get_compile_time() / 1_000_000_000 if model_data is not None else None
-                         for model_data in model_data_items]
+        compile_times = [
+            (model_data.get_compile_time() / 1_000_000_000 if model_data is not None and model_data.get_compile_time() is not None else None)
+            for model_data in model_data_items
+        ]
         yield model_info, compile_times
-    return
 
 
 def get_comparison_values_compile_time(data: List[Tuple[ModelInfo, List[Optional[float]]]]) -> ComparisonValues:

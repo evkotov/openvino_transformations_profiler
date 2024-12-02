@@ -12,7 +12,7 @@ from compare_csv import (CSVSingleFileOutputFactory, ConsoleTableSingleFileOutpu
                          CompareSumUnitsPerModel, PlotCompileTimeByIteration, PlotSumTSTimeByIteration,
                          parse_args, create_single_output_factory, SingleNoOutputFactory, Config,
                          create_multi_output_factory, create_summary_output_factory, build_data_processors,
-                         main)
+                         PlotCompareCompileTime)
 
 
 class TestCreateRatioStatsTable(unittest.TestCase):
@@ -290,8 +290,7 @@ class TestCompareCompileTime(unittest.TestCase):
         mock_compare_compile_time.return_value = (MagicMock(), MagicMock())
         mock_get_comparison_values_compile_time.return_value = MagicMock()
         mock_output_factory = MagicMock()
-        mock_plot_output = MagicMock()
-        processor = CompareCompileTime(mock_output_factory, True, mock_plot_output)
+        processor = CompareCompileTime(mock_output_factory, True)
         csv_data = [MagicMock()]
 
         processor.run(csv_data)
@@ -300,14 +299,13 @@ class TestCompareCompileTime(unittest.TestCase):
         mock_compare_compile_time.assert_called_once()
         mock_get_comparison_values_compile_time.assert_called_once()
         mock_print_summary_stats.assert_called_once()
-        mock_plot_output.plot.assert_called_once()
 
     @patch('compare_csv.get_compile_time_data')
     @patch('compare_csv.compare_compile_time')
     def test_comparing_compile_time_without_data(self, mock_compare_compile_time, mock_get_compile_time_data):
         mock_get_compile_time_data.return_value = []
         mock_output_factory = MagicMock()
-        processor = CompareCompileTime(mock_output_factory, False, None)
+        processor = CompareCompileTime(mock_output_factory, False)
         csv_data = []
 
         processor.run(csv_data)
@@ -317,21 +315,19 @@ class TestCompareCompileTime(unittest.TestCase):
         mock_output_factory.create_table.assert_not_called()
 
     @patch('compare_csv.get_compile_time_data')
-    @patch('compare_csv.get_comparison_values_compile_time')
     @patch('compare_csv.print_summary_stats')
     @patch('compare_csv.compare_compile_time')
-    def test_comparing_compile_time_without_summary_stats(self, mock_compare_compile_time, mock_print_summary_stats, mock_get_comparison_values_compile_time, mock_get_compile_time_data):
+    def test_comparing_compile_time_without_summary_stats(self, mock_compare_compile_time, mock_print_summary_stats, mock_get_compile_time_data):
         mock_get_compile_time_data.return_value = [(MagicMock(), MagicMock())]
         mock_compare_compile_time.return_value = (MagicMock(), MagicMock())
         mock_output_factory = MagicMock()
-        processor = CompareCompileTime(mock_output_factory, False, None)
+        processor = CompareCompileTime(mock_output_factory, False)
         csv_data = [MagicMock()]
 
         processor.run(csv_data)
 
         mock_get_compile_time_data.assert_called_once_with(csv_data)
         mock_compare_compile_time.assert_called_once()
-        mock_get_comparison_values_compile_time.assert_called_once()
         mock_print_summary_stats.assert_not_called()
         mock_output_factory.create_table.assert_called_once()
 
@@ -748,6 +744,12 @@ class TestParseArgs(unittest.TestCase):
         config = parse_args()
         self.assertTrue(config.plot_sum_ts_time_by_iteration)
 
+    @patch('sys.argv', ['script_name', '--input', '/dir1/file1.csv,/dir2/file2.csv', '--plot_compare_compile_time'])
+    def test_parses_plot_compare_compile_time(self):
+        config = parse_args()
+        self.assertTrue(config.plot_compare_compile_time)
+        self.assertEqual(config.inputs, ['/dir1/file1.csv', '/dir2/file2.csv'])
+
 
 class TestCreateSingleOutputFactory(unittest.TestCase):
 
@@ -905,6 +907,64 @@ class TestBuildDataProcessorsFunction(unittest.TestCase):
         config = Config()
         data_processors = build_data_processors(config)
         self.assertEqual(len(data_processors), 0)
+
+    @patch('compare_csv.PlotOutput')
+    @patch('compare_csv.PlotCompareCompileTime', autospec=True)
+    def test_adds_plot_compare_compile_time_processor(self, mock_plot_compare_compile_time, mock_plot_output):
+        config = Config()
+        config.plot_compare_compile_time = True
+        mock_plot_output_instance = mock_plot_output.return_value
+        data_processors = build_data_processors(config)
+        mock_plot_output.assert_called_once_with('compilation', 'compilation time', config.n_plot_segments)
+        mock_plot_compare_compile_time.assert_called_once_with(mock_plot_output_instance)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], PlotCompareCompileTime)
+
+    @patch('compare_csv.PlotOutput')
+    @patch('compare_csv.PlotCompareCompileTime', autospec=True)
+    def test_adds_plot_compare_compile_time_processor_with_default_prefix(self, mock_plot_compare_compile_time, mock_plot_output):
+        config = Config()
+        config.plot_compare_compile_time = True
+        config.compare_compile_time = None
+        mock_plot_output_instance = mock_plot_output.return_value
+        data_processors = build_data_processors(config)
+        mock_plot_output.assert_called_once_with('compilation', 'compilation time', config.n_plot_segments)
+        mock_plot_compare_compile_time.assert_called_once_with(mock_plot_output_instance)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], PlotCompareCompileTime)
+
+    @patch('compare_csv.PlotOutput')
+    @patch('compare_csv.PlotCompareCompileTime')
+    def test_does_not_add_plot_compare_compile_time_processor_when_not_enabled(self, mock_plot_compare_compile_time, mock_plot_output):
+        config = Config()
+        config.plot_compare_compile_time = False
+        data_processors = build_data_processors(config)
+        mock_plot_output.assert_not_called()
+        mock_plot_compare_compile_time.assert_not_called()
+        self.assertEqual(len(data_processors), 0)
+
+
+class TestPlotCompareCompileTime(unittest.TestCase):
+
+    @patch('compare_csv.PlotOutput')
+    def test_processes_compile_time_data(self, mock_plot_output):
+        config = Config()
+        config.plot_compare_compile_time = True
+        mock_plot_output_instance = mock_plot_output.return_value
+        data_processor = PlotCompareCompileTime(mock_plot_output_instance)
+        csv_data = [{ModelInfo('framework', 'name', 'precision', 'config'): ModelData()}]
+        data_processor.run(csv_data)
+        mock_plot_output_instance.plot.assert_called_once()
+
+    @patch('compare_csv.PlotOutput')
+    def test_does_nothing_when_no_data(self, mock_plot_output):
+        config = Config()
+        config.plot_compare_compile_time = True
+        mock_plot_output_instance = mock_plot_output.return_value
+        data_processor = PlotCompareCompileTime(mock_plot_output_instance)
+        csv_data = []
+        data_processor.run(csv_data)
+        mock_plot_output_instance.plot.assert_not_called()
 
 
 if __name__ == "__main__":
