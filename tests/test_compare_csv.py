@@ -11,7 +11,8 @@ from compare_csv import (CSVSingleFileOutputFactory, ConsoleTableSingleFileOutpu
                          GenerateLongestUnitsPerModel, CompareSumUnitsOverall,
                          CompareSumUnitsPerModel, PlotCompileTimeByIteration, PlotSumTSTimeByIteration,
                          parse_args, create_single_output_factory, SingleNoOutputFactory, Config,
-                         create_multi_output_factory, create_summary_output_factory)
+                         create_multi_output_factory, create_summary_output_factory, build_data_processors,
+                         main)
 
 
 class TestCreateRatioStatsTable(unittest.TestCase):
@@ -799,8 +800,6 @@ class TestCreateMultiOutputFactory(unittest.TestCase):
         self.assertEqual(factory.limit_output, 5)
 
 
-import unittest
-
 class TestCreateSummaryOutputFactory(unittest.TestCase):
 
     def test_creates_csv_summary_output_factory(self):
@@ -814,6 +813,98 @@ class TestCreateSummaryOutputFactory(unittest.TestCase):
         self.assertIsInstance(factory, ConsoleTableSingleFileOutputFactory)
         self.assertEqual(factory.description, 'description')
         self.assertIsNone(factory.limit_output)
+
+
+class TestBuildDataProcessorsFunction(unittest.TestCase):
+
+    def test_creates_data_processors_for_compile_time_comparison(self):
+        config = Config()
+        config.compare_compile_time = 'compile_time_comparison'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], CompareCompileTime)
+
+    def test_creates_data_processors_for_sum_transformation_time_comparison(self):
+        config = Config()
+        config.compare_sum_transformation_time = 'transformation_sum_time_comparison'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], CompareSumTransformationTime)
+
+    def test_creates_data_processors_for_transformations_overall(self):
+        config = Config()
+        config.transformations_overall = 'transformations_overall'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], GenerateLongestUnitsOverall)
+
+    def test_creates_data_processors_for_manager_overall(self):
+        config = Config()
+        config.manager_overall = 'manager_overall'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], GenerateLongestUnitsOverall)
+
+    def test_creates_data_processors_for_transformations_per_model(self):
+        config = Config()
+        config.transformations_per_model = 'transformations_per_model'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], GenerateLongestUnitsPerModel)
+
+    def test_creates_data_processors_for_managers_per_model(self):
+        config = Config()
+        config.managers_per_model = 'managers_per_model'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], GenerateLongestUnitsPerModel)
+
+    def test_creates_data_processors_for_compare_transformations_overall(self):
+        config = Config()
+        config.compare_transformations_overall = 'compare_transformations_overall'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], CompareSumUnitsOverall)
+
+    def test_creates_data_processors_for_compare_managers_overall(self):
+        config = Config()
+        config.compare_managers_overall = 'compare_managers_overall'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], CompareSumUnitsOverall)
+
+    def test_creates_data_processors_for_compare_transformations_per_model(self):
+        config = Config()
+        config.compare_transformations_per_model = 'compare_transformations_per_model'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], CompareSumUnitsPerModel)
+
+    def test_creates_data_processors_for_compare_managers_per_model(self):
+        config = Config()
+        config.compare_managers_per_model = 'compare_managers_per_model'
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], CompareSumUnitsPerModel)
+
+    def test_creates_data_processors_for_plot_compile_time_by_iteration(self):
+        config = Config()
+        config.plot_compile_time_by_iteration = True
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], PlotCompileTimeByIteration)
+
+    def test_creates_data_processors_for_plot_sum_ts_time_by_iteration(self):
+        config = Config()
+        config.plot_sum_ts_time_by_iteration = True
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], PlotSumTSTimeByIteration)
+
+    def test_does_nothing_when_no_data_processors(self):
+        config = Config()
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 0)
 
 
 if __name__ == "__main__":

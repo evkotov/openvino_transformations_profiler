@@ -560,7 +560,7 @@ def create_summary_output_factory(output_type: str, prefix: str, description: st
     return ConsoleTableSingleFileOutputFactory(description, None)
 
 
-def main(config: Config) -> None:
+def build_data_processors(config):
     data_processors = []
     if config.compare_compile_time:
         output_factory = create_single_output_factory(config,
@@ -644,7 +644,7 @@ def main(config: Config) -> None:
         if config.summary_statistics:
             summary_output_factory = create_summary_output_factory(config.output_type,
                                                                    config.compare_transformations_per_model,
-                                                               'compare transformations per model')
+                                                                   'compare transformations per model')
         plot_output_factory = None
         if config.plots:
             path_prefix = config.compare_transformations_per_model
@@ -661,8 +661,8 @@ def main(config: Config) -> None:
         summary_output_factory = None
         if config.summary_statistics:
             summary_output_factory = create_summary_output_factory(config.output_type,
-                                                               config.compare_managers_per_model,
-                                                               'compare managers per model')
+                                                                   config.compare_managers_per_model,
+                                                                   'compare managers per model')
         plot_output_factory = None
         if config.plots:
             path_prefix = config.compare_managers_per_model
@@ -672,12 +672,15 @@ def main(config: Config) -> None:
             plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareSumUnitsPerModel(output_factory, summary_output_factory, unit_type='manager',
                                                        plot_output=plot_output_factory))
-
     if config.plot_compile_time_by_iteration:
         data_processors.append(PlotCompileTimeByIteration())
-
     if config.plot_sum_ts_time_by_iteration:
         data_processors.append(PlotSumTSTimeByIteration())
+    return data_processors
+
+
+def main(config: Config) -> None:
+    data_processors = build_data_processors(config)
 
     if not data_processors:
         print('nothing to do ...')
