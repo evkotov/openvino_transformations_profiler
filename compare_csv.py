@@ -126,7 +126,7 @@ class CompareCompileTime(DataProcessor):
         self.__summary_stats = summary_stats
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
-        print('comparing compile time ...')
+        print('comparing compile time in plots ...')
         # CSV files can store different models info
         if not csv_data:
             print('no common models to compare compilation time ...')
