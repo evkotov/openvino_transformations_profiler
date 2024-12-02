@@ -120,17 +120,16 @@ def get_comparison_values_sum_transformation_time(data: List[Tuple[ModelInfo, Li
     return values
 
 
-def group_units_by_name(model_data: ModelData,
-                        unit_type: str) -> Dict[str, List[Unit]]:
-    result: Dict[str, List[Unit]] = {}
-    for name, units in model_data.collect_items_by_type(unit_type).items():
-        if name not in result:
-            result[name] = []
-        result[name].extend(units)
-    return result
-
-
 def get_total_by_unit_names(units_by_type):
+    """
+    Calculate the total duration and count of units grouped by their names.
+
+    Args:
+        units_by_type (Dict[str, List[Unit]]): A dictionary where the keys are unit names and the values are lists of units.
+
+    Returns:
+        Dict[str, Total]: A dictionary where the keys are unit names and the values are Total objects containing the total duration and count of units.
+    """
     total_by_unit_names: Dict[str, Total] = {}
     for name, units in units_by_type.items():
         if name not in total_by_unit_names:
@@ -162,36 +161,81 @@ class Total:
 
 
 def get_total_by_unit_names_by_csv(model_data_items: List[Optional[ModelData]], unit_type: str) -> List[Dict[str, Total]]:
+    """
+    Calculate the total duration and count of units by their names for each ModelData in the list.
+
+    Args:
+        model_data_items (List[Optional[ModelData]]): A list of ModelData objects or None.
+        unit_type (str): The type of units to be grouped and totaled.
+
+    Returns:
+        List[Dict[str, Total]]: A list of dictionaries where each dictionary contains the total duration and count of units
+                                grouped by their names for each ModelData in the input list.
+    """
     total_by_unit_names_by_csv: List[Dict[str, Total]] = []
     for model_data in model_data_items:
         if not model_data:
             total_by_unit_names_by_csv.append({})
             continue
-        units_by_type = group_units_by_name(model_data, unit_type)
+        units_by_type = model_data.collect_items_by_type(unit_type)
         total_by_unit_names = get_total_by_unit_names(units_by_type)
         total_by_unit_names_by_csv.append(total_by_unit_names)
     return total_by_unit_names_by_csv
 
 
-# return time in milliseconds
 def get_sum_units_comparison_data(data: List[Dict[ModelInfo, ModelData]], unit_type: str) -> Iterator[Tuple[ModelInfo, Dict[str, List[Optional[Total]]]]]:
+    """
+    Calculate the total duration and count of units by their names for each ModelData in the list and group them by ModelInfo.
+
+    Args:
+        data (List[Dict[ModelInfo, ModelData]]): A list of dictionaries where each dictionary maps ModelInfo to ModelData.
+        unit_type (str): The type of units to be grouped and totaled.
+
+    Returns:
+        Iterator[Tuple[ModelInfo, Dict[str, List[Optional[Total]]]]]: An iterator of tuples where each tuple contains a ModelInfo and a dictionary.
+                                                                      The dictionary maps unit names to lists of Total objects or None.
+        return time in milliseconds
+    """
     for model_info, model_data_items in full_join_by_model_info(data):
         total_by_unit_names_by_csv = get_total_by_unit_names_by_csv(model_data_items, unit_type)
         unit_names = set(name for csv in total_by_unit_names_by_csv for name in csv)
         total_list_by_unit_name: Dict[str, List[Optional[Total]]] = {}
         for name in unit_names:
-            total_list_by_unit_name[name] = [total_by_unit_names[name] if name in total_by_unit_names else None
-                                             for total_by_unit_names in total_by_unit_names_by_csv]
+            if name not in total_list_by_unit_name:
+                total_list_by_unit_name[name] = []
+            for item in total_by_unit_names_by_csv:
+                if name not in item:
+                    continue
+                total_list_by_unit_name[name].append(item[name])
         yield model_info, total_list_by_unit_name
 
 
 def join_sum_units(data: Iterator[Tuple[ModelInfo, Dict[str, List[Optional[Total]]]]]) -> Dict[str, List[Optional[Total]]]:
+    """
+    Combine the total duration and count of units by their names from multiple ModelData objects.
+
+    Args:
+        data (Iterator[Tuple[ModelInfo, Dict[str, List[Optional[Total]]]]]): An iterator of tuples where each tuple contains a ModelInfo and a dictionary.
+                                                                             The dictionary maps unit names to lists of Total objects or None.
+
+    Returns:
+        Dict[str, List[Optional[Total]]]: A dictionary where the keys are unit names and the values are lists of Total objects or None.
+                                          The lists are combined from multiple ModelData objects.
+    """
     result: Dict[str, List[Optional[Total]]] = {}
     for model_info, total_list_by_unit_name in data:
         for name, total_list in total_list_by_unit_name.items():
             if name not in result:
-                result[name] = []
-            result[name].extend(total_list)
+                result[name] = total_list
+                continue
+            assert len(result[name]) == len(total_list)
+            for i in range(len(total_list)):
+                if total_list[i] is None:
+                    continue
+                if result[name][i] is None:
+                    result[name][i] = total_list[i]
+                    continue
+                result[name][i].append(total_list[i])
     return result
 
 

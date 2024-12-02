@@ -218,13 +218,30 @@ class GenerateLongestUnitsPerModel(DataProcessor):
                 output.write(table)
 
 
+class PlotCompareSumUnitsOverall(DataProcessor):
+    def __init__(self, unit_type: str, plot_output: PlotOutput):
+        super().__init__(None)
+        self.unit_type = unit_type
+        self.__plot_output = plot_output
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print(f'compare sum {self.unit_type} overall data plot ...')
+        # CSV files can store different models info
+        csv_data_common_models = filter_common_models(csv_data)
+        if not csv_data_common_models:
+            print('no models to get sum units overall ...')
+            return
+        sum_units_data = get_sum_units_comparison_data(csv_data_common_models, self.unit_type)
+        sum_units_data_all = join_sum_units(sum_units_data)
+        comparison_values = get_comparison_values_sum_units(sum_units_data_all)
+        self.__plot_output.plot(comparison_values)
+
+
 class CompareSumUnitsOverall(DataProcessor):
-    def __init__(self, output_factory: SingleOutputFactory, unit_type: str, summary_stats: bool, plot_output: Optional[
-        PlotOutput]):
+    def __init__(self, output_factory: SingleOutputFactory, unit_type: str, summary_stats: bool):
         super().__init__(output_factory)
         self.unit_type = unit_type
         self.__summary_stats = summary_stats
-        self.__plot_output = plot_output
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} overall data ...')
@@ -235,15 +252,14 @@ class CompareSumUnitsOverall(DataProcessor):
         n_csv_files = len(csv_data)
         sum_units_data = get_sum_units_comparison_data(csv_data_common_models, self.unit_type)
         sum_units_data_all = join_sum_units(sum_units_data)
-        header, table, comparison_values = compare_sum_units(sum_units_data_all, n_csv_files)
+        for model_info, total_list in sum_units_data_all.items():
+            assert len(total_list) <= n_csv_files
+        header, table = compare_sum_units(sum_units_data_all, n_csv_files)
+        with self.output_factory.create_table(header) as output:
+            output.write(table)
         if self.__summary_stats:
             comparison_values = get_comparison_values_sum_units(sum_units_data_all)
             print_summary_stats(comparison_values)
-        if self.__plot_output:
-            comparison_values = get_comparison_values_sum_units(sum_units_data_all)
-            self.__plot_output.plot(comparison_values)
-        with self.output_factory.create_table(header) as output:
-            output.write(table)
 
 
 class CompareSumUnitsPerModel(DataProcessor):
@@ -330,6 +346,7 @@ class Config:
     plot_sum_ts_time_by_iteration: bool = False
     plot_compare_compile_time: bool = False
     plot_compare_sum_transformation_time: bool = False
+    plot_compare_transformations_overall: bool = False
 
 
 def parse_args() -> Config:
@@ -523,6 +540,9 @@ Plot graph with Y - compilation time and X - iteration number
     args_parser.add_argument('--plot_compare_sum_transformation_time', nargs='?', type=str, default=None,
                              const='transformation_sum_time_comparison',
                              help='compare sum transformation time between input files; for common models between inputs')
+    args_parser.add_argument('--plot_compare_transformations_overall', nargs='?', type=str, default=None,
+                             const='compare_transformations_overall',
+                             help='compare sum transformation time between input files; for common models between inputs')
     args_parser.add_argument('--plot_sum_ts_time_by_iteration', action='store_true',
                              help=f'''
 Plot graph with Y - sum transformation time and X - iteration number
@@ -573,6 +593,8 @@ Plot graph with Y - sum transformation time and X - iteration number
         config.plot_compare_compile_time = True
     if args.plot_compare_sum_transformation_time:
         config.plot_compare_sum_transformation_time = True
+    if args.plot_compare_transformations_overall:
+        config.plot_compare_transformations_overall = True
 
     return config
 
@@ -654,30 +676,22 @@ def build_data_processors(config):
         output_factory = create_single_output_factory(config,
                                                       config.compare_transformations_overall,
                                                       'compare transformations overall')
-        plot_output_factory = None
-        if config.plots:
-            path_prefix = config.compare_transformations_overall
-            if not path_prefix:
-                path_prefix = 'ts_overall'
-            title_prefix = 'transformations overall time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='transformation',
-                                                      summary_stats=config.summary_statistics,
-                                                      plot_output=plot_output_factory))
+                                                      summary_stats=config.summary_statistics))
+    if config.plot_compare_transformations_overall:
+        path_prefix = config.compare_transformations_overall
+        if not path_prefix:
+            path_prefix = 'ts_overall'
+        title_prefix = 'transformations overall time'
+        plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
+        data_processors.append(PlotCompareSumUnitsOverall(unit_type='transformation', plot_output=plot_output_factory))
+
     if config.compare_managers_overall:
         output_factory = create_single_output_factory(config,
                                                       config.compare_managers_overall,
                                                       'compare managers overall')
-        plot_output_factory = None
-        if config.plots:
-            path_prefix = config.compare_managers_overall
-            if not path_prefix:
-                path_prefix = 'managers_overall'
-            title_prefix = 'compare managers overall time'
-            plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(CompareSumUnitsOverall(output_factory, unit_type='manager',
-                                                      summary_stats=config.summary_statistics,
-                                                      plot_output=plot_output_factory))
+                                                      summary_stats=config.summary_statistics))
     if config.compare_transformations_per_model:
         output_factory = create_multi_output_factory(config,
                                                      config.compare_transformations_per_model,

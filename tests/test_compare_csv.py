@@ -12,7 +12,7 @@ from compare_csv import (CSVSingleFileOutputFactory, ConsoleTableSingleFileOutpu
                          CompareSumUnitsPerModel, PlotCompileTimeByIteration, PlotSumTSTimeByIteration,
                          parse_args, create_single_output_factory, SingleNoOutputFactory, Config,
                          create_multi_output_factory, create_summary_output_factory, build_data_processors,
-                         PlotCompareCompileTime, PlotCompareSumTransformationTime)
+                         PlotCompareCompileTime, PlotCompareSumTransformationTime, PlotCompareSumUnitsOverall)
 
 
 class TestCreateRatioStatsTable(unittest.TestCase):
@@ -475,11 +475,10 @@ class TestCompareSumUnitsOverall(unittest.TestCase):
         mock_filter_common_models.return_value = [MagicMock()]
         mock_get_sum_units_comparison_data.return_value = [MagicMock()]
         mock_join_sum_units.return_value = MagicMock()
-        mock_compare_sum_units.return_value = (MagicMock(), MagicMock(), MagicMock())
+        mock_compare_sum_units.return_value = (MagicMock(), MagicMock())
         mock_get_comparison_values_sum_units.return_value = MagicMock()
         mock_output_factory = MagicMock()
-        mock_plot_output = MagicMock()
-        processor = CompareSumUnitsOverall(mock_output_factory, 'transformation', True, mock_plot_output)
+        processor = CompareSumUnitsOverall(mock_output_factory, 'transformation', True)
         csv_data = [MagicMock()]
 
         processor.run(csv_data)
@@ -490,7 +489,6 @@ class TestCompareSumUnitsOverall(unittest.TestCase):
         mock_compare_sum_units.assert_called_once()
         mock_get_comparison_values_sum_units.assert_called()
         mock_print_summary_stats.assert_called_once()
-        mock_plot_output.plot.assert_called_once()
         mock_output_factory.create_table.assert_called_once()
 
     @patch('compare_csv.filter_common_models')
@@ -500,7 +498,7 @@ class TestCompareSumUnitsOverall(unittest.TestCase):
     def test_comparing_sum_units_overall_without_data(self, mock_compare_sum_units, mock_join_sum_units, mock_get_sum_units_comparison_data, mock_filter_common_models):
         mock_filter_common_models.return_value = []
         mock_output_factory = MagicMock()
-        processor = CompareSumUnitsOverall(mock_output_factory, 'transformation', False, None)
+        processor = CompareSumUnitsOverall(mock_output_factory, 'transformation', False)
         csv_data = []
 
         processor.run(csv_data)
@@ -519,9 +517,9 @@ class TestCompareSumUnitsOverall(unittest.TestCase):
         mock_filter_common_models.return_value = [MagicMock()]
         mock_get_sum_units_comparison_data.return_value = [MagicMock()]
         mock_join_sum_units.return_value = MagicMock()
-        mock_compare_sum_units.return_value = (MagicMock(), MagicMock(), MagicMock())
+        mock_compare_sum_units.return_value = (MagicMock(), MagicMock())
         mock_output_factory = MagicMock()
-        processor = CompareSumUnitsOverall(mock_output_factory, 'transformation', False, None)
+        processor = CompareSumUnitsOverall(mock_output_factory, 'transformation', False)
         csv_data = [MagicMock()]
 
         processor.run(csv_data)
@@ -539,7 +537,7 @@ class TestCompareSumUnitsOverall(unittest.TestCase):
     def test_comparing_sum_units_overall_without_data_no_summary_no_plot(self, mock_compare_sum_units, mock_join_sum_units, mock_get_sum_units_comparison_data, mock_filter_common_models):
         mock_filter_common_models.return_value = []
         mock_output_factory = MagicMock()
-        processor = CompareSumUnitsOverall(mock_output_factory, 'transformation', False, None)
+        processor = CompareSumUnitsOverall(mock_output_factory, 'transformation', False)
         csv_data = []
 
         processor.run(csv_data)
@@ -939,6 +937,38 @@ class TestBuildDataProcessorsFunction(unittest.TestCase):
         mock_plot_compare_compile_time.assert_not_called()
         self.assertEqual(len(data_processors), 0)
 
+    @patch('compare_csv.PlotOutput')
+    def test_plot_compare_transformations_overall_creates_plot_output(self, mock_plot_output):
+        config = Config()
+        config.plot_compare_transformations_overall = True
+        config.compare_transformations_overall = None
+        config.n_plot_segments = 3
+
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], PlotCompareSumUnitsOverall)
+        mock_plot_output.assert_called_once_with('ts_overall', 'transformations overall time', 3)
+
+    @patch('compare_csv.PlotOutput')
+    def test_plot_compare_transformations_overall_uses_provided_prefix(self, mock_plot_output):
+        config = Config()
+        config.plot_compare_transformations_overall = True
+        config.n_plot_segments = 3
+
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 1)
+        self.assertIsInstance(data_processors[0], PlotCompareSumUnitsOverall)
+        mock_plot_output.assert_called_once_with('ts_overall', 'transformations overall time', 3)
+
+    @patch('compare_csv.PlotOutput')
+    def test_plot_compare_transformations_overall_no_data_processors_when_disabled(self, mock_plot_output):
+        config = Config()
+        config.plot_compare_transformations_overall = False
+
+        data_processors = build_data_processors(config)
+        self.assertEqual(len(data_processors), 0)
+        mock_plot_output.assert_not_called()
+
 
 class TestPlotCompareCompileTime(unittest.TestCase):
 
@@ -996,6 +1026,58 @@ class TestBuildDataProcessors(unittest.TestCase):
         data_processors = build_data_processors(config)
         self.assertEqual(len(data_processors), 0)
         mock_plot_output.assert_not_called()
+
+
+class TestPlotCompareSumUnitsOverall(unittest.TestCase):
+
+    @patch('compare_csv.get_comparison_values_sum_units')
+    @patch('compare_csv.join_sum_units')
+    @patch('compare_csv.get_sum_units_comparison_data')
+    @patch('compare_csv.filter_common_models')
+    def test_plots_comparison_values_when_data_exists(self, mock_filter_common_models, mock_get_sum_units_comparison_data, mock_join_sum_units, mock_get_comparison_values_sum_units):
+        mock_plot_output = MagicMock()
+        processor = PlotCompareSumUnitsOverall('transformation', mock_plot_output)
+        csv_data = [MagicMock()]
+        mock_filter_common_models.return_value = csv_data
+        mock_get_sum_units_comparison_data.return_value = [MagicMock()]
+        mock_join_sum_units.return_value = MagicMock()
+        mock_get_comparison_values_sum_units.return_value = MagicMock()
+
+        processor.run(csv_data)
+
+        mock_plot_output.plot.assert_called_once()
+
+    @patch('compare_csv.get_comparison_values_sum_units')
+    @patch('compare_csv.join_sum_units')
+    @patch('compare_csv.get_sum_units_comparison_data')
+    @patch('compare_csv.filter_common_models')
+    def test_does_not_plot_when_no_data(self, mock_filter_common_models, mock_get_sum_units_comparison_data, mock_join_sum_units, mock_get_comparison_values_sum_units):
+        mock_plot_output = MagicMock()
+        processor = PlotCompareSumUnitsOverall('transformation', mock_plot_output)
+        csv_data = []
+
+        mock_filter_common_models.return_value = csv_data
+        mock_get_sum_units_comparison_data.return_value = []
+        mock_join_sum_units.return_value = None
+        mock_get_comparison_values_sum_units.return_value = None
+
+        processor.run(csv_data)
+
+        mock_plot_output.plot.assert_not_called()
+
+    @patch('compare_csv.get_comparison_values_sum_units')
+    @patch('compare_csv.join_sum_units')
+    @patch('compare_csv.get_sum_units_comparison_data')
+    @patch('compare_csv.filter_common_models')
+    def test_does_not_plot_when_no_common_models(self, mock_filter_common_models, mock_get_sum_units_comparison_data, mock_join_sum_units, mock_get_comparison_values_sum_units):
+        mock_plot_output = MagicMock()
+        processor = PlotCompareSumUnitsOverall('transformation', mock_plot_output)
+        csv_data = [MagicMock()]
+        mock_filter_common_models.return_value = []
+
+        processor.run(csv_data)
+
+        mock_plot_output.plot.assert_not_called()
 
 
 if __name__ == "__main__":

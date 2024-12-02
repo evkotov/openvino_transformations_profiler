@@ -1,8 +1,10 @@
 import unittest
+from unittest.mock import MagicMock, patch
 from ov_ts_profiler.stat_utils import join_sum_units_by_name, Total, get_comparison_values_compile_time, \
-    get_comparison_values_sum_transformation_time, get_comparison_values_sum_units, get_common_models
+    get_comparison_values_sum_transformation_time, get_comparison_values_sum_units, get_common_models, \
+    get_total_by_unit_names_by_csv, get_sum_units_comparison_data, get_total_by_unit_names
 
-from ov_ts_profiler.common_structs import ModelInfo, ModelData
+from ov_ts_profiler.common_structs import ModelInfo, ModelData, Unit
 
 
 class TestJoinSumUnitsByName(unittest.TestCase):
@@ -184,10 +186,6 @@ class TestGetComparisonValuesSumUnits(unittest.TestCase):
         self.assertEqual(result.values2, [0.0002, 0.0006])
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class TestGetCommonModels(unittest.TestCase):
     def test_common_models_with_no_data(self):
         data = []
@@ -215,3 +213,187 @@ class TestGetCommonModels(unittest.TestCase):
         ]
         result = get_common_models(data)
         self.assertEqual(result, [])
+
+
+class TestGetTotalByUnitNamesByCsv(unittest.TestCase):
+
+    def test_returns_empty_list_when_no_model_data(self):
+        result = get_total_by_unit_names_by_csv([], 'unit_type')
+        self.assertEqual(result, [])
+
+    def test_returns_empty_dict_for_none_model_data(self):
+        model_data_items = [None]
+        result = get_total_by_unit_names_by_csv(model_data_items, 'unit_type')
+        self.assertEqual(result, [{}])
+
+    def test_returns_correct_totals_for_single_model_data(self):
+        model_data = MagicMock()
+        model_data.collect_items_by_type.return_value = {'unit1': [MagicMock(), MagicMock()]}
+        model_data_items = [model_data]
+        result = get_total_by_unit_names_by_csv(model_data_items, 'unit_type')
+        self.assertEqual(len(result), 1)
+        self.assertIn('unit1', result[0])
+
+    def test_handles_multiple_model_data_items(self):
+        model_data1 = MagicMock()
+        model_data1.collect_items_by_type.return_value = {'unit1': [MagicMock()]}
+        model_data2 = MagicMock()
+        model_data2.collect_items_by_type.return_value = {'unit2': [MagicMock()]}
+        model_data_items = [model_data1, model_data2]
+        result = get_total_by_unit_names_by_csv(model_data_items, 'unit_type')
+        self.assertEqual(len(result), 2)
+        self.assertIn('unit1', result[0])
+        self.assertIn('unit2', result[1])
+
+
+class TestStatUtilsGetSumUnitComparisonData(unittest.TestCase):
+
+    @patch('ov_ts_profiler.stat_utils.full_join_by_model_info')
+    def test_returns_empty_iterator_when_no_data(self, mock_full_join):
+        mock_full_join.return_value = []
+        result = list(get_sum_units_comparison_data([], 'unit_type'))
+        self.assertEqual(result, [])
+
+    @patch('ov_ts_profiler.stat_utils.full_join_by_model_info')
+    def test_returns_empty_dict_for_none_model_data(self, mock_full_join):
+        mock_full_join.return_value = [(ModelInfo('framework', 'name', 'precision', 'config'), [None])]
+        result = list(get_sum_units_comparison_data([{}], 'unit_type'))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][1], {})
+
+    @patch('ov_ts_profiler.stat_utils.full_join_by_model_info')
+    def test_returns_correct_totals_for_single_model_data(self, mock_full_join):
+        model_data = MagicMock()
+        model_data.collect_items_by_type.return_value = {'unit1': [MagicMock(), MagicMock()]}
+        mock_full_join.return_value = [(ModelInfo('framework', 'name', 'precision', 'config'), [model_data])]
+        result = list(get_sum_units_comparison_data([{}], 'unit_type'))
+        self.assertEqual(len(result), 1)
+        self.assertIn('unit1', result[0][1])
+        self.assertEqual(len(result[0][1]['unit1']), 1)
+
+    @patch('ov_ts_profiler.stat_utils.full_join_by_model_info')
+    def test_handles_multiple_model_data_items(self, mock_full_join):
+        model_data1 = MagicMock()
+        model_data1.collect_items_by_type.return_value = {'unit1': [MagicMock()]}
+        model_data2 = MagicMock()
+        model_data2.collect_items_by_type.return_value = {'unit2': [MagicMock()]}
+        mock_full_join.return_value = [(ModelInfo('framework', 'name', 'precision', 'config'), [model_data1, model_data2])]
+        result = list(get_sum_units_comparison_data([{}], 'unit_type'))
+        self.assertEqual(len(result), 1)
+        self.assertIn('unit1', result[0][1])
+        self.assertIn('unit2', result[0][1])
+        self.assertEqual(len(result[0][1]['unit1']), 1)
+        self.assertEqual(len(result[0][1]['unit2']), 1)
+
+    @patch('ov_ts_profiler.stat_utils.full_join_by_model_info')
+    def test_valid_data(self, mock_full_join):
+        model_info1 = MagicMock(name='model_info1')
+        model_info2 = MagicMock(name='model_info2')
+        model_data1 = MagicMock()
+        model_data2 = MagicMock()
+        unit1 = MagicMock()
+        unit2 = MagicMock()
+        unit1.get_duration_median.return_value = 100
+        unit2.get_duration_median.return_value = 200
+        model_data1.collect_items_by_type.return_value = {"unit1": [unit1]}
+        model_data2.collect_items_by_type.return_value = {"unit2": [unit2]}
+        data = [{model_info1: model_data1}, {model_info2: model_data2}]
+        unit_type = "type1"
+
+        mock_full_join.return_value = [(model_info1, [model_data1]), (model_info2, [model_data2])]
+
+        result = list(get_sum_units_comparison_data(data, unit_type))
+
+        self.assertEqual(len(result), 2)
+        self.assertIn("unit1", result[0][1])
+        self.assertIn("unit2", result[1][1])
+        self.assertEqual(result[0][1]["unit1"][0].duration, 100)
+        self.assertEqual(result[1][1]["unit2"][0].duration, 200)
+
+    def test_empty_data(self):
+        data = []
+        unit_type = "type1"
+
+        result = list(get_sum_units_comparison_data(data, unit_type))
+
+        self.assertEqual(result, [])
+
+    def test_none_model_data(self):
+        model_info = MagicMock()
+        data = [{model_info: None}]
+        unit_type = "type1"
+
+        result = list(get_sum_units_comparison_data(data, unit_type))
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][1], {})
+
+    def test_duplicate_units(self):
+        model_info = MagicMock()
+        model_data = MagicMock()
+        unit1 = MagicMock()
+        unit2 = MagicMock()
+        unit1.get_duration_median.return_value = 100
+        unit2.get_duration_median.return_value = 200
+        model_data.collect_items_by_type.return_value = {"unit1": [unit1, unit2]}
+        data = [{model_info: model_data}]
+        unit_type = "type1"
+
+        result = list(get_sum_units_comparison_data(data, unit_type))
+
+        self.assertEqual(len(result), 1)
+        self.assertIn("unit1", result[0][1])
+        self.assertEqual(result[0][1]["unit1"][0].duration, 300)
+
+
+class TestGetTotalByUnitNames(unittest.TestCase):
+
+    def test_get_total_by_unit_names_with_valid_data(self):
+        unit1 = MagicMock()
+        unit1.get_duration_median.return_value = 100
+        unit1.status = '1'
+        unit2 = MagicMock()
+        unit2.get_duration_median.return_value = 200
+        unit2.status = '0'
+        units_by_type = {"unit1": [unit1], "unit2": [unit2]}
+
+        result = get_total_by_unit_names(units_by_type)
+
+        self.assertEqual(result["unit1"].duration, 100)
+        self.assertEqual(result["unit1"].count, 1)
+        self.assertEqual(result["unit1"].count_status_true, 1)
+        self.assertEqual(result["unit2"].duration, 200)
+        self.assertEqual(result["unit2"].count, 1)
+        self.assertEqual(result["unit2"].count_status_true, 0)
+
+    def test_get_total_by_unit_names_with_empty_data(self):
+        units_by_type = {}
+
+        result = get_total_by_unit_names(units_by_type)
+
+        self.assertEqual(result, {})
+
+    def test_get_total_by_unit_names_with_duplicate_units(self):
+        unit1 = MagicMock()
+        unit1.get_duration_median.return_value = 100
+        unit1.status = '1'
+        unit2 = MagicMock()
+        unit2.get_duration_median.return_value = 200
+        unit2.status = '0'
+        units_by_type = {"unit1": [unit1, unit2]}
+
+        result = get_total_by_unit_names(units_by_type)
+
+        self.assertEqual(result["unit1"].duration, 300)
+        self.assertEqual(result["unit1"].count, 2)
+        self.assertEqual(result["unit1"].count_status_true, 1)
+
+    def test_get_total_by_unit_names_with_none_units(self):
+        units_by_type = {"unit1": None}
+
+        with self.assertRaises(TypeError):
+            get_total_by_unit_names(units_by_type)
+
+
+if __name__ == '__main__':
+    unittest.main()

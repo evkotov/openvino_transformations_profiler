@@ -3,7 +3,7 @@ from typing import List
 from unittest.mock import MagicMock
 from ov_ts_profiler.table import (sort_table, compare_compile_time, compare_sum_transformation_time,
                                   compare_sum_units, get_longest_unit, create_comparison_summary_table)
-from ov_ts_profiler.stat_utils import get_compile_time_data, get_sum_transformation_time_data, group_units_by_name, \
+from ov_ts_profiler.stat_utils import get_compile_time_data, get_sum_transformation_time_data, \
     get_sum_units_comparison_data, join_sum_units, Total
 from ov_ts_profiler.common_structs import ModelInfo, ModelData, Unit, ComparisonValues
 
@@ -116,56 +116,6 @@ class TestGetSumTransformationTimeData(unittest.TestCase):
         self.assertEqual(result, [])
 
 
-class TestGroupUnitsByName(unittest.TestCase):
-
-    @staticmethod
-    def create_fake_unit():
-        fake_unit = MagicMock(spec=Unit)
-        fake_unit.csv_item = 'fake_csv_item'
-        fake_unit.device = 'fake_device'
-        fake_unit.type = 'fake_type'
-        fake_unit.name = 'fake_name'
-        fake_unit.transformation_name = 'fake_transformation'
-        fake_unit.manager_name = 'fake_manager'
-        fake_unit.status = 'fake_status'
-        return fake_unit
-
-    def test_group_units_by_name_with_multiple_units(self):
-        model_data = MagicMock()
-        unit_type = 'test_type'
-        model_data.collect_items_by_type.return_value = {
-            'unit1': [TestGroupUnitsByName.create_fake_unit(), TestGroupUnitsByName.create_fake_unit()],
-            'unit2': [TestGroupUnitsByName.create_fake_unit()]
-        }
-
-        result = group_units_by_name(model_data, unit_type)
-
-        self.assertEqual(len(result), 2)
-        self.assertEqual(len(result['unit1']), 2)
-        self.assertEqual(len(result['unit2']), 1)
-
-    def test_group_units_by_name_with_no_units(self):
-        model_data = MagicMock()
-        unit_type = 'test_type'
-        model_data.collect_items_by_type.return_value = {}
-
-        result = group_units_by_name(model_data, unit_type)
-
-        self.assertEqual(len(result), 0)
-
-    def test_group_units_by_name_with_empty_unit_list(self):
-        model_data = MagicMock()
-        unit_type = 'test_type'
-        model_data.collect_items_by_type.return_value = {
-            'unit1': []
-        }
-
-        result = group_units_by_name(model_data, unit_type)
-
-        self.assertEqual(len(result), 1)
-        self.assertEqual(len(result['unit1']), 0)
-
-
 class TestTotal(unittest.TestCase):
 
     def test_initializes_with_default_values(self):
@@ -250,7 +200,7 @@ class TestGetSumUnitsComparisonData(unittest.TestCase):
         self.assertEqual(result[0][0], model_info_1)
         self.assertEqual(result[1][0], model_info_2)
         self.assertEqual(result[0][1]['unit1'][0].get_duration_ms(), 1.0)
-        self.assertEqual(result[1][1]['unit2'][1].get_duration_ms(), 2.0)
+        self.assertEqual(result[1][1]['unit2'][0].get_duration_ms(), 2.0)
 
     def test_handles_none_model_data(self):
         model_info_1 = ModelInfo('framework1', 'model1', 'fp32', 'config1')
@@ -276,34 +226,83 @@ class TestGetSumUnitsComparisonData(unittest.TestCase):
 
 class TestJoinSumUnits(unittest.TestCase):
 
-    def test_returns_empty_dict_for_empty_input(self):
-        data = iter([])
-        result = join_sum_units(data)
+    def test_valid_data(self):
+        model_info1 = MagicMock()
+        model_info2 = MagicMock()
+        total1 = MagicMock()
+        total2 = MagicMock()
+        total1.duration = 100
+        total2.duration = 200
+        data = [
+            (model_info1, {"unit1": [total1]}),
+            (model_info2, {"unit2": [total2]})
+        ]
+
+        result = join_sum_units(iter(data))
+
+        self.assertEqual(len(result), 2)
+        self.assertIn("unit1", result)
+        self.assertIn("unit2", result)
+        self.assertEqual(result["unit1"][0].duration, 100)
+        self.assertEqual(result["unit2"][0].duration, 200)
+
+    def test_empty_data(self):
+        data = []
+
+        result = join_sum_units(iter(data))
+
         self.assertEqual(result, {})
 
-    def test_aggregates_totals_by_unit_name(self):
-        model_info = MagicMock(spec=ModelInfo)
-        total1 = MagicMock(spec=Total)
-        total2 = MagicMock(spec=Total)
-        data = iter([(model_info, {'unit1': [total1], 'unit2': [total2]})])
-        result = join_sum_units(data)
-        self.assertEqual(result, {'unit1': [total1], 'unit2': [total2]})
+    def test_none_totals(self):
+        model_info = MagicMock()
+        data = [
+            (model_info, {"unit1": [None, None]})
+        ]
 
-    def test_handles_multiple_entries_for_same_unit_name(self):
-        model_info = MagicMock(spec=ModelInfo)
-        total1 = MagicMock(spec=Total)
-        total2 = MagicMock(spec=Total)
-        total3 = MagicMock(spec=Total)
-        data = iter([(model_info, {'unit1': [total1]}), (model_info, {'unit1': [total2, total3]})])
-        result = join_sum_units(data)
-        self.assertEqual(result, {'unit1': [total1, total2, total3]})
+        result = join_sum_units(iter(data))
 
-    def test_handles_none_totals(self):
-        model_info = MagicMock(spec=ModelInfo)
-        total1 = MagicMock(spec=Total)
-        data = iter([(model_info, {'unit1': [total1, None]})])
-        result = join_sum_units(data)
-        self.assertEqual(result, {'unit1': [total1, None]})
+        self.assertEqual(len(result), 1)
+        self.assertIn("unit1", result)
+        self.assertEqual(result["unit1"], [None, None])
+
+    def test_mixed_totals(self):
+        model_info = MagicMock()
+        total1 = MagicMock()
+        total2 = MagicMock()
+        total1.duration = 100
+        total2.duration = 200
+        data = [
+            (model_info, {"unit1": [total1, None]}),
+            (model_info, {"unit1": [None, total2]})
+        ]
+
+        result = join_sum_units(iter(data))
+
+        self.assertEqual(len(result), 1)
+        self.assertIn("unit1", result)
+        self.assertEqual(result["unit1"][0].duration, 100)
+        self.assertEqual(result["unit1"][1].duration, 200)
+
+    def test_sum_of_totals(self):
+        model_info1 = MagicMock()
+        model_info2 = MagicMock()
+        total1 = Total()
+        total2 = Total()
+        total3 = Total()
+        total1.duration = 100
+        total2.duration = 200
+        total3.duration = 300
+        data = [
+            (model_info1, {"unit1": [total1, total2]}),
+            (model_info2, {"unit1": [total3, None]})
+        ]
+
+        result = join_sum_units(iter(data))
+
+        self.assertEqual(result.keys(), {"unit1"})
+        self.assertEqual(len(result["unit1"]), 2)
+        self.assertEqual(result["unit1"][0].duration, 400)
+        self.assertEqual(result["unit1"][1].duration, 200)
 
 
 class TestCompareCompileTime(unittest.TestCase):
