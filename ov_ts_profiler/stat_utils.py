@@ -66,7 +66,6 @@ def get_compile_durations(model_data_items: Iterator[ModelData]) -> Iterator[Lis
 def compile_time_by_iterations(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
     for model_info, model_data_items in full_join_by_model_info(csv_data):
         yield model_info, get_compile_durations(model_data_items)
-    return
 
 
 def get_model_sum_units_durations_by_iteration(model_data: ModelData, unit_type: str) -> List[float]:
@@ -110,7 +109,6 @@ def get_sum_transformation_time_data(data: List[Dict[ModelInfo, ModelData]]) -> 
         compile_times = [model_data.sum_transformation_time() / 1_000_000 if model_data is not None else None
                          for model_data in model_data_items]
         yield model_info, compile_times
-    return
 
 
 def get_comparison_values_sum_transformation_time(data: List[Tuple[ModelInfo, List[Optional[float]]]]) -> ComparisonValues:
@@ -185,7 +183,6 @@ def get_sum_units_comparison_data(data: List[Dict[ModelInfo, ModelData]], unit_t
             total_list_by_unit_name[name] = [total_by_unit_names[name] if name in total_by_unit_names else None
                                              for total_by_unit_names in total_by_unit_names_by_csv]
         yield model_info, total_list_by_unit_name
-    return
 
 
 def join_sum_units(data: Iterator[Tuple[ModelInfo, Dict[str, List[Optional[Total]]]]]) -> Dict[str, List[Optional[Total]]]:
