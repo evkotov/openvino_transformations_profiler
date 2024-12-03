@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import namedtuple
+from collections import namedtuple, deque
 from typing import Optional, List, Iterator, Dict, Tuple
 
 import numpy as np
@@ -31,9 +31,10 @@ class Unit:
     def __init__(self, csv_item: CSVItem):
         self.name = None
         self.device = csv_item.device
+        assert csv_item.type in ['compile_time', 'transformation', 'manager', 'manager_start', 'manager_end']
         if csv_item.type == 'transformation':
             self.name = csv_item.transformation_name
-        elif csv_item.type == 'manager':
+        elif csv_item.type == 'manager' or csv_item.type == 'manager_start' or csv_item.type == 'manager_end':
             self.name = csv_item.manager_name
         self.model_path = csv_item.model_path
         self.model_framework = csv_item.model_framework
@@ -125,6 +126,9 @@ class ModelData:
         self.items: List[Unit] = []
         self.__item_last_idx = None
         self.__last_iter_num: int = 0
+        self.__manager_plain_sequence: Optional[List[Tuple[Unit, Unit]]] = None
+        self.__manager_plain_sequence_sum: Optional[float] = None
+        self.__manager_plain_sequence_median_gap_sum: Optional[float] = None
 
     def append(self, csv_item: CSVItem) -> None:
         n_iteration = int(csv_item.iteration)
@@ -155,6 +159,66 @@ class ModelData:
 
     def get_units_with_type(self, type_name: str) -> Iterator[Unit]:
         return self.get_units(lambda item: item.type == type_name)
+
+    def __make_manager_plain_sequence(self) -> List[Tuple[Unit, Unit]]:
+        manager_timestamp_units = list(self.get_units_with_type('manager_start'))
+        manager_timestamp_units.extend(list(self.get_units_with_type('manager_end')))
+        # sorting by 0 item, since I don't know how median values will intersect each other
+        manager_timestamp_units = sorted(manager_timestamp_units, key=lambda e: e.get_durations()[0])
+        plain_seq = []
+        stack = deque()
+        for item in manager_timestamp_units:
+            if item.type == 'manager_start':
+                stack.append(item)
+            else:
+                assert stack, 'manager_end without manager_start'
+                start_item = stack.pop()
+                assert start_item.name == item.name, 'manager_start and manager_end have different names'
+                if not stack:
+                    plain_seq.append((start_item, item))
+        return plain_seq
+
+    def get_manager_plain_sequence(self) -> List[Tuple[Unit, Unit]]:
+        if self.__manager_plain_sequence is None:
+            self.__manager_plain_sequence = self.__make_manager_plain_sequence()
+        return self.__manager_plain_sequence
+
+    def get_manager_plain_sequence_names(self) -> List[str]:
+        return [start.name for start, end in self.get_manager_plain_sequence()]
+
+    def __make_manager_plain_sequence_median_sum(self) -> float:
+        result = 0.0
+        for start, end in self.get_manager_plain_sequence():
+            unit_starts = np.array(start.get_durations())
+            unit_ends = np.array(end.get_durations())
+            delta = unit_ends - unit_starts
+            delta_median = float(np.median(delta))
+            assert delta_median >= 0.0, f'negative plain sequence unit time {start.name} delta'
+            result += delta_median
+        return result
+
+    def get_manager_plain_sequence_median_sum(self) -> float:
+        if self.__manager_plain_sequence_sum is None:
+             self.__manager_plain_sequence_sum = self.__make_manager_plain_sequence_median_sum()
+        return self.__manager_plain_sequence_sum
+
+    def __make_manager_plain_sequence_median_gap_sum(self) -> float:
+        result = 0.0
+        prev_ends = None
+        for start, end in self.get_manager_plain_sequence():
+            if prev_ends is not None:
+                unit_starts = np.array(start.get_durations())
+                delta = unit_starts - prev_ends
+                delta_median = float(np.median(delta))
+                assert delta_median >= 0.0, f'negative plain sequence gap unit time delta'
+                result += delta_median
+            prev_ends = np.array(end.get_durations())
+        return result
+
+    def get_manager_plain_sequence_median_gap_sum(self) -> float:
+        if self.__manager_plain_sequence_median_gap_sum is None:
+            self.__manager_plain_sequence_median_gap_sum = self.__make_manager_plain_sequence_median_gap_sum()
+        return self.__manager_plain_sequence_median_gap_sum
 
     def collect_items_by_type(self, type_name: str) -> Dict[str, List[Unit]]:
         result: Dict[str, List[Unit]] = {}
