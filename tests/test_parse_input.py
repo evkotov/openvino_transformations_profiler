@@ -1,10 +1,11 @@
 import os
 import unittest
+from unittest.mock import patch, mock_open
 from collections import namedtuple
 
 from ov_ts_profiler.common_structs import ModelData
 from ov_ts_profiler.parse_input import get_csv_header, read_csv, is_header_valid, get_config_value_from_path, \
-    remove_invalid_items
+    remove_invalid_items, get_all_csv, get_input_csv_files
 
 
 class TestCSVHeader(unittest.TestCase):
@@ -177,3 +178,81 @@ class TestRemoveInvalidItems(unittest.TestCase):
         data = {}
         valid_data = remove_invalid_items(data)
         self.assertEqual(len(valid_data), 0)
+
+
+class TestGetAllCSV(unittest.TestCase):
+
+    @patch('os.walk')
+    def test_get_all_csv_returns_all_csv_files_in_directory(self, mock_walk):
+        mock_walk.return_value = [
+            ('/some/dir', ('subdir',), ('file1.csv', 'file2.txt', 'file3.csv')),
+            ('/some/dir/subdir', (), ('file4.csv', 'file5.txt'))
+        ]
+        result = get_all_csv('/some/dir')
+        self.assertEqual(result, [
+            '/some/dir/file1.csv',
+            '/some/dir/file3.csv',
+            '/some/dir/subdir/file4.csv'
+        ])
+
+    @patch('os.walk')
+    def test_get_all_csv_returns_empty_list_if_no_csv_files(self, mock_walk):
+        mock_walk.return_value = [
+            ('/some/dir', ('subdir',), ('file1.txt', 'file2.doc')),
+            ('/some/dir/subdir', (), ('file3.doc', 'file4.txt'))
+        ]
+        result = get_all_csv('/some/dir')
+        self.assertEqual(result, [])
+
+    @patch('os.walk')
+    def test_get_all_csv_handles_empty_directory(self, mock_walk):
+        mock_walk.return_value = []
+        result = get_all_csv('/some/dir')
+        self.assertEqual(result, [])
+
+    @patch('os.walk')
+    def test_get_all_csv_sorts_files_alphabetically(self, mock_walk):
+        mock_walk.return_value = [
+            ('/some/dir', ('subdir',), ('b.csv', 'a.csv')),
+            ('/some/dir/subdir', (), ('d.csv', 'c.csv'))
+        ]
+        result = get_all_csv('/some/dir')
+        self.assertEqual(result, [
+            '/some/dir/a.csv',
+            '/some/dir/b.csv',
+            '/some/dir/subdir/c.csv',
+            '/some/dir/subdir/d.csv'
+        ])
+
+
+class TestGetInputCSVFiles(unittest.TestCase):
+
+    @patch('os.path.isdir')
+    @patch('ov_ts_profiler.parse_input.get_all_csv')
+    def test_get_input_csv_files_returns_files_from_directory(self, mock_get_all_csv, mock_isdir):
+        mock_isdir.return_value = True
+        mock_get_all_csv.return_value = ['/some/dir/file1.csv', '/some/dir/file2.csv']
+        result = get_input_csv_files(['/some/dir'])
+        self.assertEqual(result, ['/some/dir/file1.csv', '/some/dir/file2.csv'])
+
+    @patch('os.path.isdir')
+    def test_get_input_csv_files_returns_single_file(self, mock_isdir):
+        mock_isdir.return_value = False
+        result = get_input_csv_files(['/some/dir/file1.csv'])
+        self.assertEqual(result, ['/some/dir/file1.csv'])
+
+    @patch('os.path.isdir')
+    @patch('ov_ts_profiler.parse_input.get_all_csv')
+    def test_get_input_csv_files_handles_mixed_inputs(self, mock_get_all_csv, mock_isdir):
+        mock_isdir.side_effect = [True, False]
+        mock_get_all_csv.return_value = ['/some/dir/file1.csv']
+        result = get_input_csv_files(['/some/dir', '/some/dir/file2.csv'])
+        self.assertEqual(result, ['/some/dir/file1.csv', '/some/dir/file2.csv'])
+
+    def test_get_input_csv_files_returns_empty_list_for_no_inputs(self):
+        result = get_input_csv_files([])
+        self.assertEqual(result, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

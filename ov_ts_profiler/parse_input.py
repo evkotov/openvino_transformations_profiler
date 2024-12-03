@@ -123,8 +123,9 @@ def remove_invalid_items(data: Dict[ModelInfo, ModelData]) -> Dict[ModelInfo, Mo
 
 def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
     csv_data = []
-    for csv_path in csv_paths:
-        print(f'reading {csv_path} ...')
+    for i in range(len(csv_paths)):
+        csv_path = csv_paths[i]
+        print(f'reading {csv_path} ... - it will be value#{i + 1}')
         csv_rows = read_csv(csv_path)
         current_csv_data = read_csv_data(csv_rows)
         current_csv_data = remove_invalid_items(current_csv_data)
@@ -140,7 +141,7 @@ def get_all_csv(dir_path: str) -> List[str]:
         for file in files:
             if file.endswith('.csv'):
                 csv_files.append(os.path.join(root, file))
-    return csv_files
+    return sorted(csv_files)
 
 
 def get_input_csv_files(inputs: List[str]) -> List[str]:
@@ -150,4 +151,4 @@ def get_input_csv_files(inputs: List[str]) -> List[str]:
             csv_files.extend(get_all_csv(input_path))
         else:
             csv_files.append(input_path)
-    return sorted(csv_files)
+    return csv_files

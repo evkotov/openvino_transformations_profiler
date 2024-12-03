@@ -551,20 +551,23 @@ class TestCompareSumUnitsOverall(unittest.TestCase):
 
 class TestCompareSumUnitsPerModel(unittest.TestCase):
 
-    @patch('compare_csv.filter_common_models')
     @patch('compare_csv.get_all_models')
     @patch('compare_csv.filter_by_models')
     @patch('compare_csv.get_sum_units_comparison_data')
     @patch('compare_csv.join_sum_units')
-    @patch('compare_csv.compare_sum_units')
-    @patch('compare_csv.get_comparison_values_sum_units')
+    @patch('compare_csv.join_sum_units_by_name')
+    @patch('compare_csv.get_longest_unit')
     @patch('compare_csv.create_comparison_summary_table')
-    def test_aggregating_sum_units_per_model_with_data(self, mock_create_comparison_summary_table, mock_get_comparison_values_sum_units, mock_compare_sum_units, mock_join_sum_units, mock_get_sum_units_comparison_data, mock_filter_by_models, mock_get_all_models, mock_filter_common_models):
+    @patch('compare_csv.get_comparison_values_sum_units')
+    @patch('compare_csv.compare_sum_units')
+    @patch('compare_csv.filter_common_models')
+    def test_aggregating_sum_units_per_model_with_data(self, mock_filter_common_models, mock_compare_sum_units, mock_get_comparison_values_sum_units, mock_create_comparison_summary_table, mock_get_longest_unit, mock_join_sum_units_by_name, mock_join_sum_units, mock_get_sum_units_comparison_data, mock_filter_by_models, mock_get_all_models):
         mock_filter_common_models.return_value = [MagicMock()]
-        mock_get_all_models.return_value = [MagicMock()]
+        mock_get_all_models.return_value = [ModelInfo('framework', 'model', 'precision', 'config')]
         mock_filter_by_models.return_value = MagicMock()
         mock_get_sum_units_comparison_data.return_value = [MagicMock()]
         mock_join_sum_units.return_value = MagicMock()
+        mock_join_sum_units_by_name.return_value = MagicMock()
         mock_compare_sum_units.return_value = (MagicMock(), MagicMock())
         mock_get_comparison_values_sum_units.return_value = MagicMock()
         mock_create_comparison_summary_table.return_value = (MagicMock(), MagicMock())

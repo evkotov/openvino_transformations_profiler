@@ -67,3 +67,6 @@ class TestCSVOutput(unittest.TestCase):
         with output:
             pass
         self.assertTrue(output.file.closed)
+
+if __name__ == "__main__":
+    unittest.main()

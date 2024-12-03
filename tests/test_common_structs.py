@@ -263,3 +263,7 @@ class TestMakeModelConsoleDescription(unittest.TestCase):
         model_info = ModelInfo('', '', '', '')
         result = make_model_console_description(model_info)
         self.assertEqual(result, '  ')
+
+
+if __name__ == "__main__":
+    unittest.main()

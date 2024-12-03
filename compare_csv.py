@@ -288,6 +288,9 @@ class CompareSumUnitsPerModel(DataProcessor):
             with self.output_factory.create_table(header, model_info) as output:
                 output.write(table)
             comparison_values_overall[model_info] = get_comparison_values_sum_units(sum_units_data_all)
+            if self.__plot_output:
+                prefix = make_model_file_name(f'compare_{self.unit_type}', model_info, '')
+                self.__plot_output.plot_into_file(comparison_values_overall[model_info], prefix)
         if self.__summary_output_factory:
             header, table = create_comparison_summary_table(comparison_values_overall)
             with self.__summary_output_factory.create_table(header) as output:
@@ -515,6 +518,7 @@ Output summary statistics if compare 2 input CSV files
     args_parser.add_argument('--plots', action='store_true',
                              help=f'''
 Output histograms and scatter plots if compare 2 input CSV files
+Is useful with --compare_managers_per_model, --compare_transformations_per_model
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --compare_compile_time --plots
 ''')
     args_parser.add_argument('--plot_compare_compile_time', action='store_true',
