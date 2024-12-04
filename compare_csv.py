@@ -15,7 +15,7 @@ from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, fi
     compile_time_by_iterations, get_sum_units_durations_by_iteration, get_compile_time_data, \
     get_sum_transformation_time_data, get_sum_units_comparison_data, join_sum_units, join_sum_units_by_name, \
     get_comparison_values_compile_time, get_comparison_values_sum_transformation_time, \
-    get_comparison_values_sum_units
+    get_comparison_values_sum_units, get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data
 from ov_ts_profiler.table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
     create_comparison_summary_table
 
@@ -112,9 +112,6 @@ class PlotCompareCompileTime(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing compile time ...')
         # CSV files can store different models info
-        if not csv_data:
-            print('no data to plot compilation time comparison ...')
-            return
         compile_time_data = list(get_compile_time_data(csv_data))
         comparison_values = get_comparison_values_compile_time(compile_time_data)
         self.__plot_output.plot(comparison_values)
@@ -128,9 +125,6 @@ class CompareCompileTime(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing compile time in plots ...')
         # CSV files can store different models info
-        if not csv_data:
-            print('no common models to compare compilation time ...')
-            return
         n_csv_files = len(csv_data)
         compile_time_data = list(get_compile_time_data(csv_data))
         header, table = compare_compile_time(compile_time_data, n_csv_files)
@@ -150,9 +144,6 @@ class PlotCompareSumTransformationTime(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing sum transformation time plot ...')
         # CSV files can store different models info
-        if not csv_data:
-            print('no data to plot compilation time comparison ...')
-            return
         sum_ts_data = list(get_sum_transformation_time_data(csv_data))
         comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
         self.__plot_output.plot(comparison_values)
@@ -166,9 +157,6 @@ class CompareSumTransformationTime(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing sum transformation time ...')
         # CSV files can store different models info
-        if not csv_data:
-            print('no common models to compare compilation time ...')
-            return
         n_csv_files = len(csv_data)
         sum_ts_data = list(get_sum_transformation_time_data(csv_data))
         header, table = compare_sum_transformation_time(sum_ts_data, n_csv_files)
@@ -180,6 +168,70 @@ class CompareSumTransformationTime(DataProcessor):
             print_summary_stats(comparison_values)
 
 
+class PlotCompareSumPlainManagerTime(DataProcessor):
+    def __init__(self, plot_output: PlotOutput):
+        super().__init__(None)
+        self.__plot_output = plot_output
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing sum manager plain time plot ...')
+        # CSV files can store different models info
+        sum_ts_data = list(get_sum_plain_manager_time_data(csv_data))
+        comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
+        self.__plot_output.plot(comparison_values)
+
+
+class CompareSumPlainManagerTime(DataProcessor):
+    def __init__(self, output_factory: SingleOutputFactory, summary_stats: bool):
+        super().__init__(output_factory)
+        self.__summary_stats = summary_stats
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing sum plain manager time ...')
+        # CSV files can store different models info
+        n_csv_files = len(csv_data)
+        sum_data = list(get_sum_plain_manager_time_data(csv_data))
+        header, table = compare_sum_transformation_time(sum_data, n_csv_files)
+        with self.output_factory.create_table(header) as output:
+            output.write(table)
+
+        if self.__summary_stats:
+            comparison_values = get_comparison_values_sum_transformation_time(sum_data)
+            print_summary_stats(comparison_values)
+
+
+class PlotCompareSumPlainManagerGapTime(DataProcessor):
+    def __init__(self, plot_output: PlotOutput):
+        super().__init__(None)
+        self.__plot_output = plot_output
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing sum manager plain time plot ...')
+        # CSV files can store different models info
+        sum_ts_data = list(get_sum_plain_manager_gap_time_data(csv_data))
+        comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
+        self.__plot_output.plot(comparison_values)
+
+
+class CompareSumPlainManagerGapTime(DataProcessor):
+    def __init__(self, output_factory: SingleOutputFactory, summary_stats: bool):
+        super().__init__(output_factory)
+        self.__summary_stats = summary_stats
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing sum plain manager time ...')
+        # CSV files can store different models info
+        n_csv_files = len(csv_data)
+        sum_data = list(get_sum_plain_manager_gap_time_data(csv_data))
+        header, table = compare_sum_transformation_time(sum_data, n_csv_files)
+        with self.output_factory.create_table(header) as output:
+            output.write(table)
+
+        if self.__summary_stats:
+            comparison_values = get_comparison_values_sum_transformation_time(sum_data)
+            print_summary_stats(comparison_values)
+
+
 class GenerateLongestUnitsOverall(DataProcessor):
     def __init__(self, output_factory: SingleOutputFactory, unit_type: str):
         super().__init__(output_factory)
@@ -187,9 +239,6 @@ class GenerateLongestUnitsOverall(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} overall data ...')
-        if not csv_data:
-            print('no models to get longest units overall ...')
-            return
         sum_units_data = get_sum_units_comparison_data(csv_data, self.unit_type)
         sum_units_data_all = join_sum_units(sum_units_data)
         sum_units_by_name = join_sum_units_by_name(sum_units_data_all)
@@ -205,9 +254,6 @@ class GenerateLongestUnitsPerModel(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'aggregating longest {self.unit_type} per model data ...')
-        if not csv_data:
-            print('no models to get aggregate longest units per model ...')
-            return
         for model_info in get_all_models(csv_data):
             model_data = filter_by_models(csv_data, [model_info])
             sum_units_data = get_sum_units_comparison_data(csv_data, self.unit_type)
@@ -245,9 +291,6 @@ class CompareSumUnitsOverall(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} overall data ...')
-        if not csv_data:
-            print('no models to get sum units overall ...')
-            return
         csv_data_common_models = filter_common_models(csv_data)
         n_csv_files = len(csv_data)
         sum_units_data = get_sum_units_comparison_data(csv_data_common_models, self.unit_type)
@@ -273,9 +316,6 @@ class CompareSumUnitsPerModel(DataProcessor):
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print(f'compare sum {self.unit_type} per model data ...')
-        if not csv_data:
-            print('no models to get sum units ...')
-            return
         n_csv_files = len(csv_data)
         csv_data_common_models = filter_common_models(csv_data)
         comparison_values_overall = {}
@@ -328,6 +368,8 @@ class PlotSumTSTimeByIteration(DataProcessor):
 class Config:
     compare_compile_time = None
     compare_sum_transformation_time = None
+    compare_plain_manager_sum_time: Optional[str] = None
+    compare_plain_manager_gap_sum_time: Optional[str] = None
     transformations_overall = None
     manager_overall = None
     transformations_per_model = None
@@ -350,6 +392,8 @@ class Config:
     plot_compare_compile_time: bool = False
     plot_compare_sum_transformation_time: bool = False
     plot_compare_transformations_overall: bool = False
+    plot_compare_plain_manager_sum_time: bool = False
+    plot_compare_plain_manager_gap_sum_time: bool = False
 
 
 def parse_args() -> Config:
@@ -366,6 +410,12 @@ For example, if you have 2 input CSV files /dir1/file1.csv and /dir2/file2.csv, 
     args_parser.add_argument('--compare_sum_transformation_time', nargs='?', type=str, default=None,
                              const='transformation_sum_time_comparison',
                              help='compare sum transformation time between input files; for common models between inputs')
+    args_parser.add_argument('--compare_plain_manager_sum_time', nargs='?', type=str, default=None,
+                             const='plain_manager_sum_time_comparison',
+                             help='compare sum managers plain time between input files; for common models between inputs')
+    args_parser.add_argument('--compare_plain_manager_gap_sum_time', nargs='?', type=str, default=None,
+                             const='plain_manager_gap_sum_time_comparison',
+                             help='compare sum managers plain time between input files; for common models between inputs')
     args_parser.add_argument('--transformations_overall', nargs='?', type=str, default=None,
                              const='transformations_overall',
                              metavar='path to output file',
@@ -544,6 +594,12 @@ Plot graph with Y - compilation time and X - iteration number
     args_parser.add_argument('--plot_compare_sum_transformation_time', nargs='?', type=str, default=None,
                              const='transformation_sum_time_comparison',
                              help='compare sum transformation time between input files; for common models between inputs')
+    args_parser.add_argument('--plot_compare_plain_manager_sum_time', nargs='?', type=str, default=None,
+                             const='manager_plain_sum_time_comparison',
+                             help='compare sum manager plain time between input files; for common models between inputs')
+    args_parser.add_argument('--plot_compare_plain_manager_gap_sum_time', nargs='?', type=str, default=None,
+                             const='manager_plain_gap_sum_time_comparison',
+                             help='compare sum manager plain gap time between input files; for common models between inputs')
     args_parser.add_argument('--plot_compare_transformations_overall', nargs='?', type=str, default=None,
                              const='compare_transformations_overall',
                              help='compare sum transformation time between input files; for common models between inputs')
@@ -572,6 +628,8 @@ Plot graph with Y - sum transformation time and X - iteration number
 
     config.compare_compile_time = args.compare_compile_time
     config.compare_sum_transformation_time = args.compare_sum_transformation_time
+    config.compare_plain_manager_sum_time = args.compare_plain_manager_sum_time
+    config.compare_plain_manager_gap_sum_time = args.compare_plain_manager_gap_sum_time
     config.transformations_overall = args.transformations_overall
     config.manager_overall = args.manager_overall
     config.transformations_per_model = args.transformations_per_model
@@ -599,6 +657,10 @@ Plot graph with Y - sum transformation time and X - iteration number
         config.plot_compare_sum_transformation_time = True
     if args.plot_compare_transformations_overall:
         config.plot_compare_transformations_overall = True
+    if args.plot_compare_plain_manager_sum_time:
+        config.plot_compare_plain_manager_sum_time = True
+    if args.plot_compare_plain_manager_gap_sum_time:
+        config.plot_compare_plain_manager_gap_sum_time = True
 
     return config
 
@@ -648,6 +710,26 @@ def build_data_processors(config):
                                                       'sum transformation time')
         data_processors.append(CompareSumTransformationTime(output_factory, config.summary_statistics))
 
+    if config.compare_plain_manager_sum_time:
+        output_factory = create_single_output_factory(config,
+                                                      config.compare_plain_manager_sum_time,
+                                                      'sum plain manager time')
+        data_processors.append(CompareSumPlainManagerTime(output_factory, config.summary_statistics))
+
+    if config.plot_compare_plain_manager_sum_time:
+        path_prefix = config.compare_plain_manager_sum_time
+        if not path_prefix:
+            path_prefix = 'sum_plain_manager'
+        title_prefix = 'sum plain manager time'
+        plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
+        data_processors.append(PlotCompareSumPlainManagerTime(plot_output_factory))
+
+    if config.compare_plain_manager_gap_sum_time:
+        output_factory = create_single_output_factory(config,
+                                                      config.compare_plain_manager_gap_sum_time,
+                                                      'sum plain manager gap time')
+        data_processors.append(CompareSumPlainManagerGapTime(output_factory, config.summary_statistics))
+
     if config.plot_compare_sum_transformation_time:
         path_prefix = config.compare_sum_transformation_time
         if not path_prefix:
@@ -655,6 +737,14 @@ def build_data_processors(config):
         title_prefix = 'sum transformation time'
         plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
         data_processors.append(PlotCompareSumTransformationTime(plot_output_factory))
+
+    if config.plot_compare_plain_manager_gap_sum_time:
+        path_prefix = config.compare_plain_manager_gap_sum_time
+        if not path_prefix:
+            path_prefix = 'sum_plain_manager_gap'
+        title_prefix = 'sum plain manager gap time'
+        plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
+        data_processors.append(PlotCompareSumPlainManagerGapTime(plot_output_factory))
 
     if config.transformations_overall:
         output_factory = create_single_output_factory(config,
@@ -736,6 +826,7 @@ def build_data_processors(config):
         data_processors.append(PlotCompileTimeByIteration())
     if config.plot_sum_ts_time_by_iteration:
         data_processors.append(PlotSumTSTimeByIteration())
+
     return data_processors
 
 
@@ -749,6 +840,9 @@ def main(config: Config) -> None:
     csv_data = get_csv_data(get_input_csv_files(config.inputs))
     if config.model_name:
         csv_data = filter_by_model_name(csv_data, config.model_name)
+    if not csv_data:
+        print('no data to process ...')
+        return
     for proc in data_processors:
         proc.run(csv_data)
 

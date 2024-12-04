@@ -120,6 +120,20 @@ def get_comparison_values_sum_transformation_time(data: List[Tuple[ModelInfo, Li
     return values
 
 
+def get_sum_plain_manager_time_data(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(data):
+        compile_times = [model_data.get_manager_plain_sequence_median_sum() / 1_000_000 if model_data is not None else None
+                         for model_data in model_data_items]
+        yield model_info, compile_times
+
+
+def get_sum_plain_manager_gap_time_data(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(data):
+        compile_times = [model_data.get_manager_plain_sequence_median_gap_sum() / 1_000_000 if model_data is not None else None
+                         for model_data in model_data_items]
+        yield model_info, compile_times
+
+
 def get_total_by_unit_names(units_by_type):
     """
     Calculate the total duration and count of units grouped by their names.

@@ -267,6 +267,9 @@ class ModelData:
         manager_timestamp_units = list(self.get_units_with_type('manager_start'))
         manager_timestamp_units.extend(list(self.get_units_with_type('manager_end')))
 
+        if not manager_timestamp_units:
+            return
+
         durations = [item.get_n_durations() for item in manager_timestamp_units]
         assert all(e == durations[0] for e in durations), \
             f'different number of items in different iterations: {durations}'

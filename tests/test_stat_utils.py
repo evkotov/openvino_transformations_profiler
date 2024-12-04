@@ -2,7 +2,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 from ov_ts_profiler.stat_utils import join_sum_units_by_name, Total, get_comparison_values_compile_time, \
     get_comparison_values_sum_transformation_time, get_comparison_values_sum_units, get_common_models, \
-    get_total_by_unit_names_by_csv, get_sum_units_comparison_data, get_total_by_unit_names
+    get_total_by_unit_names_by_csv, get_sum_units_comparison_data, get_total_by_unit_names, \
+    get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data
 
 from ov_ts_profiler.common_structs import ModelInfo, ModelData, Unit
 
@@ -393,6 +394,86 @@ class TestGetTotalByUnitNames(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             get_total_by_unit_names(units_by_type)
+
+
+class TestGetSumPlainManagerTime(unittest.TestCase):
+
+    def test_get_sum_plain_manager_time_data_returns_correct_data(self):
+        model_info_1 = ModelInfo(framework="framework1", name="model1", precision="precision1", config="config1")
+        model_info_2 = ModelInfo(framework="framework2", name="model2", precision="precision2", config="config2")
+
+        model_data_1 = MagicMock(spec=ModelData)
+        model_data_1.get_manager_plain_sequence_median_sum.return_value = 2000000
+
+        model_data_2 = MagicMock(spec=ModelData)
+        model_data_2.get_manager_plain_sequence_median_sum.return_value = 3000000
+
+        data = [
+            {model_info_1: model_data_1},
+            {model_info_2: model_data_2}
+        ]
+
+        result = list(get_sum_plain_manager_time_data(data))
+
+        self.assertEqual(result, [
+            (model_info_1, [2.0, None]),
+            (model_info_2, [None, 3.0])
+        ])
+
+    def test_get_sum_plain_manager_time_data_handles_empty_data(self):
+        data = []
+        result = list(get_sum_plain_manager_time_data(data))
+        self.assertEqual(result, [])
+
+    def test_get_sum_plain_manager_time_data_handles_none_model_data(self):
+        model_info_1 = ModelInfo(framework="framework1", name="model1", precision="precision1", config="config1")
+        data = [
+            {model_info_1: None}
+        ]
+        result = list(get_sum_plain_manager_time_data(data))
+        self.assertEqual(result, [
+            (model_info_1, [None])
+        ])
+
+
+class TestGetManagerPlainSequenceGap(unittest.TestCase):
+
+    def test_get_sum_plain_manager_gap_time_data_returns_correct_data(self):
+        model_info_1 = ModelInfo(framework="framework1", name="model1", precision="precision1", config="config1")
+        model_info_2 = ModelInfo(framework="framework2", name="model2", precision="precision2", config="config2")
+
+        model_data_1 = MagicMock(spec=ModelData)
+        model_data_1.get_manager_plain_sequence_median_gap_sum.return_value = 2000000
+
+        model_data_2 = MagicMock(spec=ModelData)
+        model_data_2.get_manager_plain_sequence_median_gap_sum.return_value = 3000000
+
+        data = [
+            {model_info_1: model_data_1},
+            {model_info_2: model_data_2}
+        ]
+
+        result = list(get_sum_plain_manager_gap_time_data(data))
+
+        self.assertEqual(result, [
+            (model_info_1, [2.0, None]),
+            (model_info_2, [None, 3.0])
+        ])
+
+    def test_get_sum_plain_manager_gap_time_data_handles_empty_data(self):
+        data = []
+        result = list(get_sum_plain_manager_gap_time_data(data))
+        self.assertEqual(result, [])
+
+    def test_get_sum_plain_manager_gap_time_data_handles_none_model_data(self):
+        model_info_1 = ModelInfo(framework="framework1", name="model1", precision="precision1", config="config1")
+        data = [
+            {model_info_1: None}
+        ]
+        result = list(get_sum_plain_manager_gap_time_data(data))
+        self.assertEqual(result, [
+            (model_info_1, [None])
+        ])
 
 
 if __name__ == '__main__':
