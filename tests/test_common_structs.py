@@ -470,6 +470,46 @@ class TestModelData(unittest.TestCase):
         result = model_data.get_manager_plain_sequence_median_gap_sum()
         self.assertEqual(result, 0.0)
 
+    def test_check_manager_plain_sequence_valid_data(self):
+        model_data = ModelData()
+        csv_item_start = CSVItem('GPU', 'path', 'name', 'framework', 'precision', 'config', '1', 'manager_start', 'transformation', 'manager', '0.1', True)
+        csv_item_end = CSVItem('GPU', 'path', 'name', 'framework', 'precision', 'config', '1', 'manager_end', 'transformation', 'manager', '0.2', True)
+        model_data.append(csv_item_start)
+        model_data.append(csv_item_end)
+        model_data.check_manager_plain_sequence()
+
+    def test_check_manager_plain_sequence_missing_start(self):
+        model_data = ModelData()
+        csv_item_end = CSVItem('GPU', 'path', 'name', 'framework', 'precision', 'config', '1', 'manager_end', 'transformation', 'manager', '0.2', True)
+        model_data.append(csv_item_end)
+        with self.assertRaises(AssertionError):
+            model_data.check_manager_plain_sequence()
+
+    def test_check_manager_plain_sequence_missing_end(self):
+        model_data = ModelData()
+        csv_item_start = CSVItem('GPU', 'path', 'name', 'framework', 'precision', 'config', '1', 'manager_start', 'transformation', 'manager', '0.1', True)
+        model_data.append(csv_item_start)
+        with self.assertRaises(AssertionError):
+            model_data.check_manager_plain_sequence()
+
+    def test_check_manager_plain_sequence_different_names(self):
+        model_data = ModelData()
+        csv_item_start = CSVItem('GPU', 'path', 'name', 'framework', 'precision', 'config', '1', 'manager_start', 'transformation', 'manager1', '0.1', True)
+        csv_item_end = CSVItem('GPU', 'path', 'name', 'framework', 'precision', 'config', '1', 'manager_end', 'transformation', 'manager2', '0.2', True)
+        model_data.append(csv_item_start)
+        model_data.append(csv_item_end)
+        with self.assertRaises(AssertionError):
+            model_data.check_manager_plain_sequence()
+
+    def test_check_manager_plain_sequence_start_time_greater_than_end_time(self):
+        model_data = ModelData()
+        csv_item_start = CSVItem('GPU', 'path', 'name', 'framework', 'precision', 'config', '1', 'manager_start', 'transformation', 'manager', '0.3', True)
+        csv_item_end = CSVItem('GPU', 'path', 'name', 'framework', 'precision', 'config', '1', 'manager_end', 'transformation', 'manager', '0.2', True)
+        model_data.append(csv_item_start)
+        model_data.append(csv_item_end)
+        with self.assertRaises(AssertionError):
+            model_data.check_manager_plain_sequence()
+
 
 class TestMakeModelConsoleDescription(unittest.TestCase):
 

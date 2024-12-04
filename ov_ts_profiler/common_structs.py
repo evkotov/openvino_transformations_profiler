@@ -263,6 +263,29 @@ class ModelData:
             return 0
         return self.items[0].get_n_durations()
 
+    def check_manager_plain_sequence(self):
+        manager_timestamp_units = list(self.get_units_with_type('manager_start'))
+        manager_timestamp_units.extend(list(self.get_units_with_type('manager_end')))
+
+        durations = [item.get_n_durations() for item in manager_timestamp_units]
+        assert all(e == durations[0] for e in durations), \
+            f'different number of items in different iterations: {durations}'
+        n_durations = durations[0]
+
+        for i in range(n_durations):
+            manager_timestamp_units = sorted(manager_timestamp_units, key=lambda e: e.get_durations()[i])
+            stack = deque()
+            for item in manager_timestamp_units:
+                if item.type == 'manager_start':
+                    stack.append(item)
+                else:
+                    assert stack, 'manager_end without manager_start'
+                    start_item = stack.pop()
+                    assert start_item.name == item.name, 'manager_start and manager_end have different names'
+                    assert start_item.get_durations()[i] <= item.get_durations()[i], \
+                        f'manager_start time is greater than manager_end time'
+            assert not stack, 'manager_start without manager_end'
+
     def check(self) -> None:
         if len(self.items) == 0:
             return
@@ -275,6 +298,7 @@ class ModelData:
         n_compile_time_items = sum(1 for _ in self.get_units_with_type('compile_time'))
         assert n_compile_time_items == 1, \
             f'iteration data must consists exact 1 compile_time item but there are: {n_compile_time_items}'
+        self.check_manager_plain_sequence()
 
 
 ModelInfo = namedtuple('ModelInfo', ['framework',
