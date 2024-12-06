@@ -164,6 +164,7 @@ class ModelData:
         manager_timestamp_units = list(self.get_units_with_type('manager_start'))
         manager_timestamp_units.extend(list(self.get_units_with_type('manager_end')))
         # sorting by 0 item, since I don't know how median values will intersect each other
+        # sequence should be the same for all iterations, it is checked in check_manager_plain_sequence()
         manager_timestamp_units = sorted(manager_timestamp_units, key=lambda e: e.get_durations()[0])
         plain_seq = []
         stack = deque()
@@ -275,6 +276,8 @@ class ModelData:
             f'different number of items in different iterations: {durations}'
         n_durations = durations[0]
 
+        first_sequence = None
+        current_sequence = []
         for i in range(n_durations):
             manager_timestamp_units = sorted(manager_timestamp_units, key=lambda e: e.get_durations()[i])
             stack = deque()
@@ -287,7 +290,13 @@ class ModelData:
                     assert start_item.name == item.name, 'manager_start and manager_end have different names'
                     assert start_item.get_durations()[i] <= item.get_durations()[i], \
                         f'manager_start time is greater than manager_end time'
+                    current_sequence.append((start_item, item))
             assert not stack, 'manager_start without manager_end'
+            if first_sequence is None:
+                first_sequence = current_sequence
+            else:
+                assert first_sequence == current_sequence, 'different manager plain sequences in different iterations'
+            current_sequence = []
 
     def check(self) -> None:
         if len(self.items) == 0:

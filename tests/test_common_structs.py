@@ -510,6 +510,37 @@ class TestModelData(unittest.TestCase):
         with self.assertRaises(AssertionError):
             model_data.check_manager_plain_sequence()
 
+    def test_different_manager_plain_sequences_in_different_iterations(self):
+        csv_items = [
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager1', '0.1', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager1', '0.2', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager1', '0.3', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager1', '0.4', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '3', 'manager_start', 'transformation1', 'manager1', '0.5', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '3', 'manager_end', 'transformation1', 'manager1', '0.6', True)
+        ]
+        model_data = ModelData()
+        for item in csv_items:
+            model_data.append(item)
+        model_data.check_manager_plain_sequence()
+
+    def test_different_manager_plain_sequences_in_different_iterations_fail(self):
+        csv_items = [
+            CSVItem('GPU', 'path1', 'name1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager1', '10.0', True),
+            CSVItem('GPU', 'path1', 'name1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager2', '20.0', True),
+            CSVItem('GPU', 'path1', 'name1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager2', '30.0', True),
+            CSVItem('GPU', 'path1', 'name1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager1', '40.0', True),
+            CSVItem('GPU', 'path1', 'name1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager1', '20.0', True),
+            CSVItem('GPU', 'path1', 'name1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager2', '10.0', True),
+            CSVItem('GPU', 'path1', 'name1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager2', '40.0', True),
+            CSVItem('GPU', 'path1', 'name1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager1', '30.0', True),
+        ]
+        model_data = ModelData()
+        for item in csv_items:
+            model_data.append(item)
+        with self.assertRaises(AssertionError):
+            model_data.check_manager_plain_sequence()
+
 
 class TestMakeModelConsoleDescription(unittest.TestCase):
 
