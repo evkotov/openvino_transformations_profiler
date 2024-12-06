@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 from ov_ts_profiler.stat_utils import join_sum_units_by_name, Total, get_comparison_values_compile_time, \
     get_comparison_values_sum_transformation_time, get_comparison_values_sum_units, get_common_models, \
     get_total_by_unit_names_by_csv, get_sum_units_comparison_data, get_total_by_unit_names, \
-    get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data
+    get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data, compile_time_by_iterations
 
 from ov_ts_profiler.common_structs import ModelInfo, ModelData, Unit
 
@@ -474,6 +474,47 @@ class TestGetManagerPlainSequenceGap(unittest.TestCase):
         self.assertEqual(result, [
             (model_info_1, [None])
         ])
+
+
+class TestCompileTimeByIterations(unittest.TestCase):
+
+    def test_compile_time_by_iterations_with_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): ModelData()},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                model_data[model_info].get_compile_durations = MagicMock(return_value=[0.1, 0.2])
+
+        result = list(compile_time_by_iterations(csv_data))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [[0.1, 0.2]])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+    def test_compile_time_by_iterations_empty_data(self):
+        csv_data = []
+        result = list(compile_time_by_iterations(csv_data))
+        self.assertEqual(result, [])
+
+    def test_compile_time_by_iterations_none_model_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): None},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                if model_data[model_info] is not None:
+                    model_data[model_info].get_compile_durations = MagicMock(return_value=[0.1, 0.2])
+
+        result = list(compile_time_by_iterations(csv_data))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
 
 
 if __name__ == '__main__':

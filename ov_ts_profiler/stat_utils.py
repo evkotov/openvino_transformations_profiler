@@ -65,7 +65,7 @@ def get_compile_durations(model_data_items: Iterator[ModelData]) -> Iterator[Lis
 
 def compile_time_by_iterations(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
     for model_info, model_data_items in full_join_by_model_info(csv_data):
-        yield model_info, get_compile_durations(model_data_items)
+        yield model_info, get_compile_durations(iter(model_data_items))
 
 
 def get_model_sum_units_durations_by_iteration(model_data: ModelData, unit_type: str) -> List[float]:
