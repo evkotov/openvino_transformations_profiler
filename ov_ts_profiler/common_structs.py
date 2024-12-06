@@ -129,6 +129,9 @@ class ModelData:
         self.__manager_plain_sequence: Optional[List[Tuple[Unit, Unit]]] = None
         self.__manager_plain_sequence_sum: Optional[float] = None
         self.__manager_plain_sequence_median_gap_sum: Optional[float] = None
+        self.__manager_plain_sequence_sum_by_iteration: Optional[List[float]] = None
+        self.__manager_plain_sequence_median_gap_sum_by_iteration: Optional[List[float]] = None
+        self.__manager_plain_sequence_median_gap_sum: Optional[float] = None
 
     def append(self, csv_item: CSVItem) -> None:
         n_iteration = int(csv_item.iteration)
@@ -188,33 +191,80 @@ class ModelData:
         return [start.name for start, end in self.get_manager_plain_sequence()]
 
     def __make_manager_plain_sequence_median_sum(self) -> float:
-        result = 0.0
-        for start, end in self.get_manager_plain_sequence():
-            unit_starts = np.array(start.get_durations())
-            unit_ends = np.array(end.get_durations())
-            delta = unit_ends - unit_starts
-            delta_median = float(np.median(delta))
-            assert delta_median >= 0.0, f'negative plain sequence unit time {start.name} delta'
-            result += delta_median
+        sums = self.get_manager_plain_sequence_sum_by_iteration()
+        if not sums:
+            return float(0.0)
+        return float(np.median(sums))
+
+    def __make_manager_plain_sequence_sum_by_iteration(self) -> List[float]:
+        """
+        Calculate the sum of manager plain sequence durations for each iteration.
+
+        Returns:
+            List[float]: A list of sums of manager plain sequence durations for each iteration.
+        """
+        manager_plain_seq = self.get_manager_plain_sequence()
+        if not manager_plain_seq:
+            return []
+        n_durations = manager_plain_seq[0][0].get_n_durations()
+        result = []
+        for i in range(n_durations):
+            result_sum = 0.0
+            for start, end in manager_plain_seq:
+                unit_starts = start.get_durations()[i]
+                unit_ends = end.get_durations()[i]
+                delta = unit_ends - unit_starts
+                assert delta >= 0.0, f'negative plain sequence unit time {start.name} delta'
+                result_sum += delta
+            result.append(result_sum)
         return result
+
+    def get_manager_plain_sequence_sum_by_iteration(self) -> List[float]:
+        """
+        Calculate the sum of manager plain sequence durations for each iteration.
+
+        Returns:
+            List[float]: A list of sums of manager plain sequence durations for each iteration.
+        """
+        if self.__manager_plain_sequence_sum_by_iteration is None:
+            self.__manager_plain_sequence_sum_by_iteration = self.__make_manager_plain_sequence_sum_by_iteration()
+        return self.__manager_plain_sequence_sum_by_iteration
 
     def get_manager_plain_sequence_median_sum(self) -> float:
         if self.__manager_plain_sequence_sum is None:
              self.__manager_plain_sequence_sum = self.__make_manager_plain_sequence_median_sum()
         return self.__manager_plain_sequence_sum
 
-    def __make_manager_plain_sequence_median_gap_sum(self) -> float:
-        result = 0.0
-        prev_ends = None
-        for start, end in self.get_manager_plain_sequence():
-            if prev_ends is not None:
-                unit_starts = np.array(start.get_durations())
-                delta = unit_starts - prev_ends
-                delta_median = float(np.median(delta))
-                assert delta_median >= 0.0, f'negative plain sequence gap unit time delta'
-                result += delta_median
-            prev_ends = np.array(end.get_durations())
+    def __make_manager_plain_sequence_median_gap_sum_by_iteration(self) -> List[float]:
+        manager_plain_seq = self.get_manager_plain_sequence()
+        if not manager_plain_seq:
+            return []
+        n_durations = manager_plain_seq[0][0].get_n_durations()
+        result = []
+        for i in range(n_durations):
+            result_sum = 0.0
+            prev_ends = None
+            for start, end in manager_plain_seq:
+                unit_starts = start.get_durations()[i]
+                if prev_ends is not None:
+                    delta = unit_starts - prev_ends
+                    assert delta >= 0.0, f'negative plain sequence gap unit time delta'
+                    result_sum += delta
+                prev_ends = end.get_durations()[i]
+            result.append(result_sum)
         return result
+
+    def get_manager_plain_sequence_median_gap_sum_by_iteration(self) -> List[float]:
+        if self.__manager_plain_sequence_median_gap_sum_by_iteration is None:
+            self.__manager_plain_sequence_median_gap_sum_by_iteration = (
+                self.__make_manager_plain_sequence_median_gap_sum_by_iteration())
+        return self.__manager_plain_sequence_median_gap_sum_by_iteration
+
+    def __make_manager_plain_sequence_median_gap_sum(self) -> float:
+        sums = self.get_manager_plain_sequence_median_gap_sum_by_iteration()
+        if not sums:
+            return float(0.0)
+        return float(np.median(sums))
 
     def get_manager_plain_sequence_median_gap_sum(self) -> float:
         if self.__manager_plain_sequence_median_gap_sum is None:

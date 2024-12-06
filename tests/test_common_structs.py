@@ -541,6 +541,102 @@ class TestModelData(unittest.TestCase):
         with self.assertRaises(AssertionError):
             model_data.check_manager_plain_sequence()
 
+    def test_manager_plain_sequence_sum_by_iteration(self):
+        csv_items = [
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager1', '0.1', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager1', '0.2', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager1', '0.3', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager1', '0.4', True)
+        ]
+        model_data = ModelData()
+        for item in csv_items:
+            model_data.append(item)
+        result = model_data.get_manager_plain_sequence_sum_by_iteration()
+        np.testing.assert_almost_equal(result, [0.1, 0.1], decimal=7)
+
+    def test_manager_plain_sequence_sum_by_iteration_empty(self):
+        model_data = ModelData()
+        result = model_data.get_manager_plain_sequence_sum_by_iteration()
+        self.assertEqual(result, [])
+
+    def test_manager_plain_sequence_sum_by_iteration_negative_delta(self):
+        csv_items = [
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager1', '0.2', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager1', '0.1', True)
+        ]
+        model_data = ModelData()
+        for item in csv_items:
+            model_data.append(item)
+        with self.assertRaises(AssertionError):
+            model_data.get_manager_plain_sequence_sum_by_iteration()
+
+    def test_manager_plain_sequence_median_gap_sum_by_iteration(self):
+        csv_items = [
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager1', '0.1', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager1', '0.2', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager1', '0.3', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager1', '0.4', True)
+        ]
+        model_data = ModelData()
+        for item in csv_items:
+            model_data.append(item)
+        result = model_data.get_manager_plain_sequence_median_gap_sum_by_iteration()
+        np.testing.assert_almost_equal(result, [0.0, 0.0], decimal=7)
+
+    def test_manager_plain_sequence_median_gap_sum_by_iteration_with_gap(self):
+        csv_items = [
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager1', '0.1', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager1', '0.3', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager2', '0.4', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager2', '0.5', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager1', '0.4', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager1', '0.6', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager2', '0.7', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager2', '0.8', True),
+        ]
+        model_data = ModelData()
+        for item in csv_items:
+            model_data.append(item)
+        result = model_data.get_manager_plain_sequence_median_gap_sum_by_iteration()
+        np.testing.assert_almost_equal(result, [0.1, 0.1], decimal=7)
+
+    def test_manager_plain_sequence_median_gap_sum_by_iteration_with_gap_overlapping_managers(self):
+        csv_items = [
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager1', '0.1', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager3', '0.2', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager3', '0.3', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager1', '0.3', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager2', '0.4', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager2', '0.5', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager1', '0.4', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager3', '0.4', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager3', '0.5', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager1', '0.6', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_start', 'transformation1', 'manager2', '0.7', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '2', 'manager_end', 'transformation1', 'manager2', '0.8', True),
+        ]
+        model_data = ModelData()
+        for item in csv_items:
+            model_data.append(item)
+        result = model_data.get_manager_plain_sequence_median_gap_sum_by_iteration()
+        np.testing.assert_almost_equal(result, [0.1, 0.1], decimal=7)
+
+    def test_manager_plain_sequence_median_gap_sum_by_iteration_empty(self):
+        model_data = ModelData()
+        result = model_data.get_manager_plain_sequence_median_gap_sum_by_iteration()
+        self.assertEqual(result, [])
+
+    def test_manager_plain_sequence_median_gap_sum_by_iteration_negative_delta(self):
+        csv_items = [
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_start', 'transformation1', 'manager1', '0.2', True),
+            CSVItem('GPU', 'path1', 'model1', 'framework1', 'precision1', 'config1', '1', 'manager_end', 'transformation1', 'manager1', '0.1', True)
+        ]
+        model_data = ModelData()
+        for item in csv_items:
+            model_data.append(item)
+        with self.assertRaises(AssertionError):
+            model_data.get_manager_plain_sequence_median_gap_sum_by_iteration()
+
 
 class TestMakeModelConsoleDescription(unittest.TestCase):
 
