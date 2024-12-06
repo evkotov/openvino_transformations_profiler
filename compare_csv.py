@@ -15,7 +15,8 @@ from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, fi
     compile_time_by_iterations, get_sum_units_durations_by_iteration, get_compile_time_data, \
     get_sum_transformation_time_data, get_sum_units_comparison_data, join_sum_units, join_sum_units_by_name, \
     get_comparison_values_compile_time, get_comparison_values_sum_transformation_time, \
-    get_comparison_values_sum_units, get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data
+    get_comparison_values_sum_units, get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data, \
+    get_plain_manager_time_by_iteration, get_plain_manager_gap_time_by_iteration
 from ov_ts_profiler.table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
     create_comparison_summary_table
 
@@ -364,6 +365,26 @@ class PlotSumTSTimeByIteration(DataProcessor):
             gen_plot_time_by_iterations('.', device, model_info, durations, 'Sum of transformations', 'sum_ts')
 
 
+class PlotPlainManagerTimeByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, durations in get_plain_manager_time_by_iteration(csv_data):
+            gen_plot_time_by_iterations('.', device, model_info, durations, 'Plain manager time', 'plain_manager_time')
+
+
+class PlotPlainManagerGapTimeByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, durations in get_plain_manager_gap_time_by_iteration(csv_data):
+            gen_plot_time_by_iterations('.', device, model_info, durations, 'Plain manager gap time', 'plain_manager_gap_time')
+
+
 @dataclass
 class Config:
     compare_compile_time = None
@@ -394,6 +415,8 @@ class Config:
     plot_compare_transformations_overall: bool = False
     plot_compare_plain_manager_sum_time: bool = False
     plot_compare_plain_manager_gap_sum_time: bool = False
+    plot_plain_time_by_iteration: bool = False
+    plot_plain_gap_time_by_iteration: bool = False
 
 
 def parse_args() -> Config:
@@ -608,6 +631,16 @@ Plot graph with Y - compilation time and X - iteration number
 Plot graph with Y - sum transformation time and X - iteration number
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_sum_ts_time_by_iteration
 ''')
+    args_parser.add_argument('--plot_plain_time_by_iteration', action='store_true',
+                             help=f'''
+Plot graph with Y - sum plain manager time and X - iteration number
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_plain_time_by_iteration
+''')
+    args_parser.add_argument('--plot_plain_gap_time_by_iteration', action='store_true',
+                             help=f'''
+Plot graph with Y - sum plain manager gap time and X - iteration number
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_plain_gap_time_by_iteration
+''')
 
     args = args_parser.parse_args()
     if not args.input:
@@ -661,6 +694,10 @@ Plot graph with Y - sum transformation time and X - iteration number
         config.plot_compare_plain_manager_sum_time = True
     if args.plot_compare_plain_manager_gap_sum_time:
         config.plot_compare_plain_manager_gap_sum_time = True
+    if args.plot_plain_time_by_iteration:
+        config.plot_plain_time_by_iteration = True
+    if args.plot_plain_gap_time_by_iteration:
+        config.plot_plain_gap_time_by_iteration = True
 
     return config
 
@@ -826,6 +863,10 @@ def build_data_processors(config):
         data_processors.append(PlotCompileTimeByIteration())
     if config.plot_sum_ts_time_by_iteration:
         data_processors.append(PlotSumTSTimeByIteration())
+    if config.plot_plain_time_by_iteration:
+        data_processors.append(PlotPlainManagerTimeByIteration())
+    if config.plot_plain_gap_time_by_iteration:
+        data_processors.append(PlotPlainManagerGapTimeByIteration())
 
     return data_processors
 

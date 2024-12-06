@@ -84,6 +84,20 @@ def get_sum_units_durations_by_iteration(csv_data: List[Dict[ModelInfo, ModelDat
         yield model_info, durations
 
 
+def get_plain_manager_time_by_iteration(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        durations = (data.get_manager_plain_sequence_sum_by_iteration() for data in model_data_items
+                     if data is not None)
+        yield model_info, durations
+
+
+def get_plain_manager_gap_time_by_iteration(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        durations = (data.get_manager_plain_sequence_median_gap_sum_by_iteration() for data in model_data_items
+                     if data is not None)
+        yield model_info, durations
+
+
 # return compilation time in seconds
 def get_compile_time_data(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
     for model_info, model_data_items in full_join_by_model_info(data):
