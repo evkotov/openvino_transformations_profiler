@@ -1,46 +1,45 @@
-import json
+from typing import Dict, List, Tuple
+import openpyxl
 import sys
-from typing import Dict, List
-import numpy as np
+import os
 
-from ov_ts_profiler.plot_utils import Hist
+from ov_ts_profiler.plot_utils import PlotOutput
+from ov_ts_profiler.common_structs import ComparisonValues
 
-
-def load_json(json_file):
-    with open(json_file) as f:
-        return json.load(f)
+COLUMN_MODEL_NAME = 0
+COLUMN_VALUE = 4
 
 
-def get_values(data) -> Dict[str, float]:
-    result = {}
-    for model_data in data:
-        value = model_data[4]
-        if not value:
+def parse_data(path: str):
+    wb = openpyxl.load_workbook(path)
+    sheet = wb.active
+    data = {}
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        try:
+            value = float(row[COLUMN_VALUE])
+        except ValueError:
             continue
-        model_name = model_data[0]
-        result[model_name] = value
+        data[row[COLUMN_MODEL_NAME]] = row[COLUMN_VALUE]
+    return data
+
+
+
+def full_join_by_model_name(data1: Dict[str, float], data2: Dict[str, float]) -> List[Tuple[str, float, float]]:
+    names = set(key for key in data1 if key in data2)
+    result = []
+    for model_name in names:
+        result.append((model_name, data1[model_name], data2[model_name]))
     return result
 
 
-def get_ratios(data1, data2) -> List[float]:
-    ratios = []
-    values1 = get_values(data1)
-    values2 = get_values(data2)
-    for name in values1:
-        if name not in values2:
-            continue
-        ratios.append(abs(1 - values1[name]/values2[name]))
-    return ratios
-
-
 if __name__ == '__main__':
-    data1 = load_json(sys.argv[1])
-    data2 = load_json(sys.argv[2])
-    ratios = get_ratios(data1, data2)
-    mean = np.mean(ratios)
-    std = np.std(ratios)
-    maximum = np.max(ratios)
-    print(f'mean: {mean}, std: {std}, max: {maximum}')
-    hist = Hist('Ratio', 'Count', 'Ratio distribution')
-    hist.set_values(ratios)
-    hist.plot('diff_distribution.png')
+    input1 = sys.argv[1]
+    input2 = sys.argv[2]
+    data1 = parse_data(input1)
+    data2 = parse_data(input2)
+    comparison_values = ComparisonValues('')
+    for data in full_join_by_model_name(data1, data2):
+        comparison_values.add(data[1], data[2])
+    prefix = os.path.basename(input1) + os.path.basename(input2)
+    plot = PlotOutput(prefix, "", 1)
+    plot.plot(comparison_values)
