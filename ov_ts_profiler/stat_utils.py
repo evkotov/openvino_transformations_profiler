@@ -65,7 +65,7 @@ def get_compile_durations(model_data_items: Iterator[ModelData]) -> Iterator[Lis
 
 def compile_time_by_iterations(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
     for model_info, model_data_items in full_join_by_model_info(csv_data):
-        yield model_info, get_compile_durations(model_data_items)
+        yield model_info, get_compile_durations(iter(model_data_items))
 
 
 def get_model_sum_units_durations_by_iteration(model_data: ModelData, unit_type: str) -> List[float]:
@@ -80,6 +80,20 @@ def get_sum_units_durations_by_iteration(csv_data: List[Dict[ModelInfo, ModelDat
                                          unit_type: str) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
     for model_info, model_data_items in full_join_by_model_info(csv_data):
         durations = (get_model_sum_units_durations_by_iteration(data, unit_type) for data in model_data_items
+                     if data is not None)
+        yield model_info, durations
+
+
+def get_plain_manager_time_by_iteration(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        durations = (data.get_manager_plain_sequence_sum_by_iteration() for data in model_data_items
+                     if data is not None)
+        yield model_info, durations
+
+
+def get_plain_manager_gap_time_by_iteration(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[List[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        durations = (data.get_manager_plain_sequence_median_gap_sum_by_iteration() for data in model_data_items
                      if data is not None)
         yield model_info, durations
 
@@ -118,6 +132,20 @@ def get_comparison_values_sum_transformation_time(data: List[Tuple[ModelInfo, Li
             continue
         values.add(compile_times[0], compile_times[1])
     return values
+
+
+def get_sum_plain_manager_time_data(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(data):
+        compile_times = [model_data.get_manager_plain_sequence_median_sum() / 1_000_000 if model_data is not None else None
+                         for model_data in model_data_items]
+        yield model_info, compile_times
+
+
+def get_sum_plain_manager_gap_time_data(data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(data):
+        compile_times = [model_data.get_manager_plain_sequence_median_gap_sum() / 1_000_000 if model_data is not None else None
+                         for model_data in model_data_items]
+        yield model_info, compile_times
 
 
 def get_total_by_unit_names(units_by_type):
@@ -257,3 +285,19 @@ def join_sum_units_by_name(data: Dict[str, List[Optional[Total]]]) -> Dict[str, 
             if total is not None:
                 result[name].append(total)
     return result
+
+
+def join_mem_rss_by_model(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[int]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        values = [model_data.get_mem_rss() if model_data is not None else None for model_data in model_data_items]
+        if not all(item is not None for item in values):
+            continue
+        yield model_info, [model_data.get_mem_rss() if model_data is not None else None for model_data in model_data_items]
+
+
+def join_mem_virtual_by_model(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[int]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        values = [model_data.get_mem_virtual() if model_data is not None else None for model_data in model_data_items]
+        if not all(item is not None for item in values):
+            continue
+        yield model_info, values

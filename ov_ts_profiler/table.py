@@ -103,6 +103,56 @@ def compare_sum_transformation_time(data: List[Tuple[ModelInfo, List[Optional[fl
     return header, sort_table(table, get_max_delta)
 
 
+def compare_compilation_and_plain_manager_sum_time(data: List[Tuple[ModelInfo, float, float]]):
+    header = ['framework',
+              'name',
+              'precision',
+              'config',
+              'compilation time (sec)',
+              'plain manager sum time (sec)',
+              'ratio manager/compilation']
+
+    table = []
+    for model_info, compile_time, plain_time in data:
+        ratio = 'N/A'
+        if compile_time != 0.0:
+            ratio = plain_time / compile_time
+        row = {'framework': model_info.framework, 'name': model_info.name, 'precision': model_info.precision,
+               'config': model_info.config, 'compilation time (sec)': compile_time,
+               'plain manager sum time (sec)': plain_time, 'ratio manager/compilation': ratio}
+        table.append(row)
+
+    def get_max_ratio(row: Dict) -> float:
+        return row['ratio manager/compilation']
+    return header, sort_table(table, get_max_ratio)
+
+
+def compare_mem_rss(data: List[Tuple[ModelInfo, int, int]]):
+    header = ['framework',
+              'name',
+              'precision',
+              'config',
+              'mem #1 (bytes)',
+              'mem #2 (bytes)',
+              'mem #2 - mem #1 (bytes)',
+              'ratio mem #2/mem #1']
+
+    table = []
+    for model_info, mem1, mem2 in data:
+        ratio = 'N/A'
+        if mem1 != 0:
+            ratio = mem2 / mem1
+        row = {'framework': model_info.framework, 'name': model_info.name, 'precision': model_info.precision,
+               'config': model_info.config, 'mem #1 (bytes)': mem1,
+               'mem #2 (bytes)': mem2, 'mem #2 - mem #1 (bytes)': mem2 - mem1,
+               'ratio mem #2/mem #1': ratio}
+        table.append(row)
+
+    def get_max_ratio(row: Dict) -> float:
+        return row['ratio mem #2/mem #1']
+    return header, sort_table(table, get_max_ratio)
+
+
 def get_longest_unit(data: Dict[str, Total]):
     header = ['name', 'total duration (ms)', 'count of executions', 'count of status true']
     table = []

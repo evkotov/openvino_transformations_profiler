@@ -59,6 +59,7 @@ class Plot:
         self.__plot_size = size
 
     def plot(self, path: str):
+        plt.rcParams.update({'font.size': 14})  # Set global font size
         need_a_legend = False
 
         plt.figure(figsize=self.__plot_size)
@@ -131,6 +132,7 @@ class Hist:
         self.__values = values
 
     def plot(self, path: str):
+        plt.rcParams.update({'font.size': 14})  # Set global font size
         plt.figure(figsize=self.__plot_size)
         plt.hist(self.__values, bins=self.__bins, edgecolor='black')
 
@@ -168,6 +170,7 @@ class ScatterPlot:
         self.__h_fill = ScatterPlot.HFill(y_min, y_max, label)
 
     def plot(self, path: str):
+        plt.rcParams.update({'font.size': 14})  # Set global font size
         plt.figure(figsize=self.__plot_size)
         assert len(self.__x_values) == len(self.__y_values)
         plt.scatter(self.__x_values, self.__y_values)
@@ -200,63 +203,136 @@ class ScatterPlot:
         plt.close()
 
 
+def divide_into_segments_by_y_values(x_values, y_values, n_segments: int):
+    if n_segments == 1:
+        yield x_values, y_values
+        return
+    if not x_values:
+        return
+    log_numbers = np.log(np.abs(y_values) + 1)  # Use absolute values and add 1 to handle zero and negative values
+    min_log = np.min(log_numbers)
+    max_log = np.max(log_numbers)
+    bins = np.linspace(min_log, max_log, n_segments)
+    indices = np.digitize(log_numbers, bins)
+
+    for i in range(1, n_segments  + 1):
+        x_part = []
+        y_part = []
+        for j in range(len(y_values)):
+            if indices[j] != i:
+                continue
+            x_part.append(x_values[j])
+            y_part.append(y_values[j])
+        if not x_part:
+            continue
+        yield x_part, y_part
+
+
+class PlotOutputRatio:
+    def __init__(self):
+        self.__label = ''
+
+    def get_base_label(self):
+        return self.__label
+
+    def set_label(self, label: str):
+        self.__label = label
+
+    def get_label(self, value1_label: str, value2_label: str):
+        if self.get_base_label():
+            return self.get_base_label()
+        return f'ratio ({value2_label}/{value1_label} - 1), %'
+
+    def get_ratio(self, values: ComparisonValues):
+        return values.get_ratios()
+
+
+class PlotOutputRatioSimple(PlotOutputRatio):
+    def __init__(self):
+        super().__init__()
+
+    def get_ratio(self, values: ComparisonValues):
+        return values.get_simple_ratios()
+
+    def get_label(self, value1_label: str, value2_label: str):
+        if self.get_base_label():
+            return self.get_base_label()
+        return f'ratio ({value2_label}/{value1_label}), %'
+
+
 class PlotOutput:
     def __init__(self, path_prefix, title_prefix: str, n_segments: int):
         self.path_prefix = path_prefix
         self.title_prefix = title_prefix
         self.n_segments = n_segments
+        self.__get_ratio_func = PlotOutputRatio()
+        self.__label1 = ''
+        self.__label2 = ''
+        self.__label_y_hist = ''
+        self.__label_x_scatter = ''
 
-    def plot_scatter(self, prefix: str, i: int, x_part: List[float], y_part: List[float], y_median: float, unit: str):
-        title = f'{self.title_prefix} scatter ratio part {i}'
-        scatter_path = f'{prefix}_scatter_part{i}.png'
-        y_label = f'ratio (value #2/value #1 - 1), %'
-        x_label = f'max (value #1, value #2), {unit}'
+    def set_label_y_hist(self, label: str):
+        self.__label_y_hist = label
 
-        scatter = ScatterPlot(title, x_label, y_label)
-        scatter.set_values(x_part, y_part)
-        scatter.add_horizontal_line(y_median, f'median {y_median:.2f} %')
-        scatter.plot(scatter_path)
+    def set_label_x_scatter(self, label: str):
+        self.__label_x_scatter = label
 
-    def plot_hist(self, prefix: str, i: int, y_part: List[float]):
-        title = f'{self.title_prefix} histogram ratio part {i}'
-        hist_path = f'{prefix}_hist_part{i}.png'
-        x_label = f'ratio (value #2/value #1 - 1), %'
+    def set_value1_label(self, label: str):
+        self.__label1 = label
+
+    def set_value2_label(self, label: str):
+        self.__label2 = label
+
+    def set_get_ratio_func(self, get_ratio_func):
+        self.__get_ratio_func = get_ratio_func
+
+    def __get_title(self):
+        title = f'{self.title_prefix}'
+        if self.n_segments > 1:
+            title += ' part {i}'
+        return title
+
+    def __get_output_path(self, prefix: str, plot_type: str) -> str:
+        path = f'{prefix}_{plot_type}'
+        if self.n_segments > 1:
+            path += '_part{i}'
+        path += '.png'
+        return path
+
+    def plot_scatter(self, prefix: str, i: int, max_values_part: List[float], ratios_part: List[float], y_median: float, unit: str):
+        y_label = self.__get_ratio_func.get_label(self.__label1, self.__label2)
+        x_label = f'max ({self.__label1}, {self.__label2}), {unit}'
+        if self.__label_x_scatter:
+            x_label = self.__label_x_scatter
+
+        scatter = ScatterPlot(self.__get_title(), x_label, y_label)
+        scatter.set_values(max_values_part, ratios_part)
+        scatter.add_horizontal_line(y_median, f'median {y_median:.1f} %')
+        scatter.plot(self.__get_output_path(prefix, 'scatter'))
+
+    def plot_hist(self, prefix: str, i: int, ratios_part: List[float]):
+        x_label = self.__get_ratio_func.get_label(self.__label1, self.__label2)
+
         y_label = f'number of values'
+        if self.__label_y_hist:
+            y_label = self.__label_y_hist
 
-        hist = Hist(title, x_label, y_label)
-        hist.set_values(y_part)
-        hist.plot(hist_path)
+        hist = Hist(self.__get_title(), x_label, y_label)
+        hist.set_values(ratios_part)
+        hist.plot(self.__get_output_path(prefix, 'hist'))
+
+    def __plot_values(self, i, max_values_part, ratios_part, unit: str, prefix: str):
+        y_values = np.array(ratios_part)
+        y_median = float(np.median(y_values))
+        self.plot_scatter(prefix, i, max_values_part, ratios_part, y_median, unit)
+        self.plot_hist(prefix, i, ratios_part)
 
     def plot_into_file(self, values: ComparisonValues, prefix: str):
-        ratios = values.get_ratios()
+        ratios = self.__get_ratio_func.get_ratio(values)
         max_values = values.get_max_values()
         assert len(ratios) == len(max_values)
-
-        log_numbers = np.log(max_values)
-        min_log = np.min(log_numbers)
-        max_log = np.max(log_numbers)
-        bins = np.linspace(min_log, max_log, self.n_segments  + 1)
-        indices = np.digitize(log_numbers, bins)
-
-        for i in range(1, self.n_segments  + 1):
-            x_part = []
-            y_part = []
-            n_outliers = 0
-            for j in range(len(max_values)):
-                if indices[j] != i:
-                    continue
-                x_part.append(max_values[j])
-                y_part.append(ratios[j])
-
-            if not x_part:
-                continue
-
-            y_values = np.array(y_part)
-            y_median = float(np.median(y_values))
-
-            self.plot_scatter(prefix, i, x_part, y_part, y_median, values.unit)
-            self.plot_hist(prefix, i, y_part)
-
+        for i, (max_values_part, ratios_part) in enumerate(divide_into_segments_by_y_values(max_values, ratios, self.n_segments)):
+            self.__plot_values(i, max_values_part, ratios_part, values.unit, prefix)
 
     def plot(self, values: ComparisonValues):
         self.plot_into_file(values, self.path_prefix)

@@ -2,7 +2,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 from ov_ts_profiler.stat_utils import join_sum_units_by_name, Total, get_comparison_values_compile_time, \
     get_comparison_values_sum_transformation_time, get_comparison_values_sum_units, get_common_models, \
-    get_total_by_unit_names_by_csv, get_sum_units_comparison_data, get_total_by_unit_names
+    get_total_by_unit_names_by_csv, get_sum_units_comparison_data, get_total_by_unit_names, \
+    get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data, compile_time_by_iterations, \
+    get_sum_units_durations_by_iteration, get_plain_manager_time_by_iteration, get_plain_manager_gap_time_by_iteration, \
+    join_mem_rss_by_model, join_mem_virtual_by_model
 
 from ov_ts_profiler.common_structs import ModelInfo, ModelData, Unit
 
@@ -393,6 +396,306 @@ class TestGetTotalByUnitNames(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             get_total_by_unit_names(units_by_type)
+
+
+class TestGetSumPlainManagerTime(unittest.TestCase):
+
+    def test_get_sum_plain_manager_time_data_returns_correct_data(self):
+        model_info_1 = ModelInfo(framework="framework1", name="model1", precision="precision1", config="config1")
+        model_info_2 = ModelInfo(framework="framework2", name="model2", precision="precision2", config="config2")
+
+        model_data_1 = MagicMock(spec=ModelData)
+        model_data_1.get_manager_plain_sequence_median_sum.return_value = 2000000
+
+        model_data_2 = MagicMock(spec=ModelData)
+        model_data_2.get_manager_plain_sequence_median_sum.return_value = 3000000
+
+        data = [
+            {model_info_1: model_data_1},
+            {model_info_2: model_data_2}
+        ]
+
+        result = list(get_sum_plain_manager_time_data(data))
+
+        self.assertEqual(result, [
+            (model_info_1, [2.0, None]),
+            (model_info_2, [None, 3.0])
+        ])
+
+    def test_get_sum_plain_manager_time_data_handles_empty_data(self):
+        data = []
+        result = list(get_sum_plain_manager_time_data(data))
+        self.assertEqual(result, [])
+
+    def test_get_sum_plain_manager_time_data_handles_none_model_data(self):
+        model_info_1 = ModelInfo(framework="framework1", name="model1", precision="precision1", config="config1")
+        data = [
+            {model_info_1: None}
+        ]
+        result = list(get_sum_plain_manager_time_data(data))
+        self.assertEqual(result, [
+            (model_info_1, [None])
+        ])
+
+
+class TestGetManagerPlainSequenceGap(unittest.TestCase):
+
+    def test_get_sum_plain_manager_gap_time_data_returns_correct_data(self):
+        model_info_1 = ModelInfo(framework="framework1", name="model1", precision="precision1", config="config1")
+        model_info_2 = ModelInfo(framework="framework2", name="model2", precision="precision2", config="config2")
+
+        model_data_1 = MagicMock(spec=ModelData)
+        model_data_1.get_manager_plain_sequence_median_gap_sum.return_value = 2000000
+
+        model_data_2 = MagicMock(spec=ModelData)
+        model_data_2.get_manager_plain_sequence_median_gap_sum.return_value = 3000000
+
+        data = [
+            {model_info_1: model_data_1},
+            {model_info_2: model_data_2}
+        ]
+
+        result = list(get_sum_plain_manager_gap_time_data(data))
+
+        self.assertEqual(result, [
+            (model_info_1, [2.0, None]),
+            (model_info_2, [None, 3.0])
+        ])
+
+    def test_get_sum_plain_manager_gap_time_data_handles_empty_data(self):
+        data = []
+        result = list(get_sum_plain_manager_gap_time_data(data))
+        self.assertEqual(result, [])
+
+    def test_get_sum_plain_manager_gap_time_data_handles_none_model_data(self):
+        model_info_1 = ModelInfo(framework="framework1", name="model1", precision="precision1", config="config1")
+        data = [
+            {model_info_1: None}
+        ]
+        result = list(get_sum_plain_manager_gap_time_data(data))
+        self.assertEqual(result, [
+            (model_info_1, [None])
+        ])
+
+
+class TestCompileTimeByIterations(unittest.TestCase):
+
+    def test_compile_time_by_iterations_with_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): ModelData()},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                model_data[model_info].get_compile_durations = MagicMock(return_value=[0.1, 0.2])
+
+        result = list(compile_time_by_iterations(csv_data))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [[0.1, 0.2]])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+    def test_compile_time_by_iterations_empty_data(self):
+        csv_data = []
+        result = list(compile_time_by_iterations(csv_data))
+        self.assertEqual(result, [])
+
+    def test_compile_time_by_iterations_none_model_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): None},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                if model_data[model_info] is not None:
+                    model_data[model_info].get_compile_durations = MagicMock(return_value=[0.1, 0.2])
+
+        result = list(compile_time_by_iterations(csv_data))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+
+class TestSumUnitsDurationsByIteration(unittest.TestCase):
+
+    def test_sum_units_durations_by_iteration_with_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): ModelData()},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                model_data[model_info].get_units_with_type = MagicMock(return_value=[MagicMock(get_durations=MagicMock(return_value=[0.1, 0.2]))])
+                model_data[model_info].get_n_iterations = MagicMock(return_value=2)
+
+        result = list(get_sum_units_durations_by_iteration(csv_data, 'unit_type'))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [[0.1, 0.2]])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+    def test_sum_units_durations_by_iteration_empty_data(self):
+        csv_data = []
+        result = list(get_sum_units_durations_by_iteration(csv_data, 'unit_type'))
+        self.assertEqual(result, [])
+
+    def test_sum_units_durations_by_iteration_none_model_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): None},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                if model_data[model_info] is not None:
+                    model_data[model_info].get_units_with_type = MagicMock(return_value=[MagicMock(get_durations=MagicMock(return_value=[0.1, 0.2]))])
+                    model_data[model_info].get_n_iterations = MagicMock(return_value=2)
+
+        result = list(get_sum_units_durations_by_iteration(csv_data, 'unit_type'))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+
+class TestPlainManagerTimeByIteration(unittest.TestCase):
+
+    def test_plain_manager_time_by_iteration_with_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): ModelData()},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                model_data[model_info].get_manager_plain_sequence_sum_by_iteration = MagicMock(return_value=[0.1, 0.2])
+
+        result = list(get_plain_manager_time_by_iteration(csv_data))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [[0.1, 0.2]])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+    def test_plain_manager_time_by_iteration_empty_data(self):
+        csv_data = []
+        result = list(get_plain_manager_time_by_iteration(csv_data))
+        self.assertEqual(result, [])
+
+    def test_plain_manager_time_by_iteration_none_model_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): None},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                if model_data[model_info] is not None:
+                    model_data[model_info].get_manager_plain_sequence_sum_by_iteration = MagicMock(return_value=[0.1, 0.2])
+
+        result = list(get_plain_manager_time_by_iteration(csv_data))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+
+class TestPlainManagerGapTimeByIteration(unittest.TestCase):
+
+    def test_plain_manager_gap_time_by_iteration_with_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): ModelData()},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                model_data[model_info].get_manager_plain_sequence_median_gap_sum_by_iteration = MagicMock(return_value=[0.1, 0.2])
+
+        result = list(get_plain_manager_gap_time_by_iteration(csv_data))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [[0.1, 0.2]])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+    def test_plain_manager_gap_time_by_iteration_empty_data(self):
+        csv_data = []
+        result = list(get_plain_manager_gap_time_by_iteration(csv_data))
+        self.assertEqual(result, [])
+
+    def test_plain_manager_gap_time_by_iteration_none_model_data(self):
+        csv_data = [
+            {ModelInfo('framework1', 'model1', 'precision1', 'config1'): None},
+            {ModelInfo('framework2', 'model2', 'precision2', 'config2'): ModelData()}
+        ]
+        for model_data in csv_data:
+            for model_info in model_data:
+                if model_data[model_info] is not None:
+                    model_data[model_info].get_manager_plain_sequence_median_gap_sum_by_iteration = MagicMock(return_value=[0.1, 0.2])
+
+        result = list(get_plain_manager_gap_time_by_iteration(csv_data))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0][0].name, 'model1')
+        self.assertEqual(result[1][0].name, 'model2')
+        self.assertEqual(list(result[0][1]), [])
+        self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+
+class TestJoinMemRssByModel(unittest.TestCase):
+    def test_join_mem_rss_by_model_with_valid_data(self):
+        model_info_mock = MagicMock()
+        model_data_mock = MagicMock()
+        model_data_mock.get_mem_rss.return_value = 1024
+        csv_data = [{model_info_mock: model_data_mock}]
+        result = list(join_mem_rss_by_model(csv_data))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][1], [1024])
+
+    def test_join_mem_rss_by_model_with_none_data(self):
+        model_info_mock = MagicMock()
+        csv_data = [{model_info_mock: None}]
+        result = list(join_mem_rss_by_model(csv_data))
+        self.assertEqual(len(result), 0)
+
+    def test_join_mem_rss_by_model_with_mixed_data(self):
+        model_info_mock = MagicMock()
+        model_data_mock1 = MagicMock()
+        model_data_mock1.get_mem_rss.return_value = 1024
+        model_data_mock2 = MagicMock()
+        model_data_mock2.get_mem_rss.return_value = None
+        csv_data = [{model_info_mock: model_data_mock1}, {model_info_mock: model_data_mock2}]
+        result = list(join_mem_rss_by_model(csv_data))
+        self.assertEqual(len(result), 0)
+
+
+class TestJoinMemVirtualByModel(unittest.TestCase):
+    def test_join_mem_virtual_by_model_with_valid_data(self):
+        model_info_mock = MagicMock()
+        model_data_mock = MagicMock()
+        model_data_mock.get_mem_virtual.return_value = 2048
+        csv_data = [{model_info_mock: model_data_mock}]
+        result = list(join_mem_virtual_by_model(csv_data))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][1], [2048])
+
+    def test_join_mem_virtual_by_model_with_none_data(self):
+        model_info_mock = MagicMock()
+        csv_data = [{model_info_mock: None}]
+        result = list(join_mem_virtual_by_model(csv_data))
+        self.assertEqual(len(result), 0)
+
+    def test_join_mem_virtual_by_model_with_mixed_data(self):
+        model_info_mock = MagicMock()
+        model_data_mock1 = MagicMock()
+        model_data_mock1.get_mem_virtual.return_value = 2048
+        model_data_mock2 = MagicMock()
+        model_data_mock2.get_mem_virtual.return_value = None
+        csv_data = [{model_info_mock: model_data_mock1}, {model_info_mock: model_data_mock2}]
+        result = list(join_mem_virtual_by_model(csv_data))
+        self.assertEqual(len(result), 0)
 
 
 if __name__ == '__main__':

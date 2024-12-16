@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import namedtuple
+from collections import namedtuple, deque
 from typing import Optional, List, Iterator, Dict, Tuple
 
 import numpy as np
@@ -31,9 +31,11 @@ class Unit:
     def __init__(self, csv_item: CSVItem):
         self.name = None
         self.device = csv_item.device
+        assert csv_item.type in ['compile_time', 'transformation', 'manager',
+                                 'manager_start', 'manager_end', 'mem_rss', 'mem_virtual']
         if csv_item.type == 'transformation':
             self.name = csv_item.transformation_name
-        elif csv_item.type == 'manager':
+        elif csv_item.type == 'manager' or csv_item.type == 'manager_start' or csv_item.type == 'manager_end':
             self.name = csv_item.manager_name
         self.model_path = csv_item.model_path
         self.model_framework = csv_item.model_framework
@@ -125,6 +127,12 @@ class ModelData:
         self.items: List[Unit] = []
         self.__item_last_idx = None
         self.__last_iter_num: int = 0
+        self.__manager_plain_sequence: Optional[List[Tuple[Unit, Unit]]] = None
+        self.__manager_plain_sequence_sum: Optional[float] = None
+        self.__manager_plain_sequence_median_gap_sum: Optional[float] = None
+        self.__manager_plain_sequence_sum_by_iteration: Optional[List[float]] = None
+        self.__manager_plain_sequence_median_gap_sum_by_iteration: Optional[List[float]] = None
+        self.__manager_plain_sequence_median_gap_sum: Optional[float] = None
 
     def append(self, csv_item: CSVItem) -> None:
         n_iteration = int(csv_item.iteration)
@@ -155,6 +163,128 @@ class ModelData:
 
     def get_units_with_type(self, type_name: str) -> Iterator[Unit]:
         return self.get_units(lambda item: item.type == type_name)
+
+    def get_mem_rss(self) -> int:
+        try:
+            item = next(self.get_units_with_type('mem_rss'))
+            return int(item.get_durations()[0])
+        except StopIteration:
+            return 0
+
+    def get_mem_virtual(self) -> int:
+        try:
+            item = next(self.get_units_with_type('mem_virtual'))
+            return int(item.get_durations()[0])
+        except StopIteration:
+            return 0
+
+    def __make_manager_plain_sequence(self) -> List[Tuple[Unit, Unit]]:
+        manager_timestamp_units = list(self.get_units_with_type('manager_start'))
+        manager_timestamp_units.extend(list(self.get_units_with_type('manager_end')))
+        # sorting by 0 item, since I don't know how median values will intersect each other
+        # sequence should be the same for all iterations, it is checked in check_manager_plain_sequence()
+        manager_timestamp_units = sorted(manager_timestamp_units, key=lambda e: e.get_durations()[0])
+        plain_seq = []
+        stack = deque()
+        for item in manager_timestamp_units:
+            if item.type == 'manager_start':
+                stack.append(item)
+            else:
+                assert stack, 'manager_end without manager_start'
+                start_item = stack.pop()
+                assert start_item.name == item.name, 'manager_start and manager_end have different names'
+                if not stack:
+                    plain_seq.append((start_item, item))
+        return plain_seq
+
+    def get_manager_plain_sequence(self) -> List[Tuple[Unit, Unit]]:
+        if self.__manager_plain_sequence is None:
+            self.__manager_plain_sequence = self.__make_manager_plain_sequence()
+        return self.__manager_plain_sequence
+
+    def get_manager_plain_sequence_names(self) -> List[str]:
+        return [start.name for start, end in self.get_manager_plain_sequence()]
+
+    def __make_manager_plain_sequence_median_sum(self) -> float:
+        sums = self.get_manager_plain_sequence_sum_by_iteration()
+        if not sums:
+            return float(0.0)
+        return float(np.median(sums))
+
+    def __make_manager_plain_sequence_sum_by_iteration(self) -> List[float]:
+        """
+        Calculate the sum of manager plain sequence durations for each iteration.
+
+        Returns:
+            List[float]: A list of sums of manager plain sequence durations for each iteration.
+        """
+        manager_plain_seq = self.get_manager_plain_sequence()
+        if not manager_plain_seq:
+            return []
+        n_durations = manager_plain_seq[0][0].get_n_durations()
+        result = []
+        for i in range(n_durations):
+            result_sum = 0.0
+            for start, end in manager_plain_seq:
+                unit_starts = start.get_durations()[i]
+                unit_ends = end.get_durations()[i]
+                delta = unit_ends - unit_starts
+                assert delta >= 0.0, f'negative plain sequence unit time {start.name} delta'
+                result_sum += delta
+            result.append(result_sum)
+        return result
+
+    def get_manager_plain_sequence_sum_by_iteration(self) -> List[float]:
+        """
+        Calculate the sum of manager plain sequence durations for each iteration.
+
+        Returns:
+            List[float]: A list of sums of manager plain sequence durations for each iteration.
+        """
+        if self.__manager_plain_sequence_sum_by_iteration is None:
+            self.__manager_plain_sequence_sum_by_iteration = self.__make_manager_plain_sequence_sum_by_iteration()
+        return self.__manager_plain_sequence_sum_by_iteration
+
+    def get_manager_plain_sequence_median_sum(self) -> float:
+        if self.__manager_plain_sequence_sum is None:
+             self.__manager_plain_sequence_sum = self.__make_manager_plain_sequence_median_sum()
+        return self.__manager_plain_sequence_sum
+
+    def __make_manager_plain_sequence_median_gap_sum_by_iteration(self) -> List[float]:
+        manager_plain_seq = self.get_manager_plain_sequence()
+        if not manager_plain_seq:
+            return []
+        n_durations = manager_plain_seq[0][0].get_n_durations()
+        result = []
+        for i in range(n_durations):
+            result_sum = 0.0
+            prev_ends = None
+            for start, end in manager_plain_seq:
+                unit_starts = start.get_durations()[i]
+                if prev_ends is not None:
+                    delta = unit_starts - prev_ends
+                    assert delta >= 0.0, f'negative plain sequence gap unit time delta'
+                    result_sum += delta
+                prev_ends = end.get_durations()[i]
+            result.append(result_sum)
+        return result
+
+    def get_manager_plain_sequence_median_gap_sum_by_iteration(self) -> List[float]:
+        if self.__manager_plain_sequence_median_gap_sum_by_iteration is None:
+            self.__manager_plain_sequence_median_gap_sum_by_iteration = (
+                self.__make_manager_plain_sequence_median_gap_sum_by_iteration())
+        return self.__manager_plain_sequence_median_gap_sum_by_iteration
+
+    def __make_manager_plain_sequence_median_gap_sum(self) -> float:
+        sums = self.get_manager_plain_sequence_median_gap_sum_by_iteration()
+        if not sums:
+            return float(0.0)
+        return float(np.median(sums))
+
+    def get_manager_plain_sequence_median_gap_sum(self) -> float:
+        if self.__manager_plain_sequence_median_gap_sum is None:
+            self.__manager_plain_sequence_median_gap_sum = self.__make_manager_plain_sequence_median_gap_sum()
+        return self.__manager_plain_sequence_median_gap_sum
 
     def collect_items_by_type(self, type_name: str) -> Dict[str, List[Unit]]:
         result: Dict[str, List[Unit]] = {}
@@ -199,6 +329,40 @@ class ModelData:
             return 0
         return self.items[0].get_n_durations()
 
+    def check_manager_plain_sequence(self):
+        manager_timestamp_units = list(self.get_units_with_type('manager_start'))
+        manager_timestamp_units.extend(list(self.get_units_with_type('manager_end')))
+
+        if not manager_timestamp_units:
+            return
+
+        durations = [item.get_n_durations() for item in manager_timestamp_units]
+        assert all(e == durations[0] for e in durations), \
+            f'different number of items in different iterations: {durations}'
+        n_durations = durations[0]
+
+        first_sequence = None
+        current_sequence = []
+        for i in range(n_durations):
+            manager_timestamp_units = sorted(manager_timestamp_units, key=lambda e: e.get_durations()[i])
+            stack = deque()
+            for item in manager_timestamp_units:
+                if item.type == 'manager_start':
+                    stack.append(item)
+                else:
+                    assert stack, 'manager_end without manager_start'
+                    start_item = stack.pop()
+                    assert start_item.name == item.name, 'manager_start and manager_end have different names'
+                    assert start_item.get_durations()[i] <= item.get_durations()[i], \
+                        f'manager_start time is greater than manager_end time'
+                    current_sequence.append((start_item, item))
+            assert not stack, 'manager_start without manager_end'
+            if first_sequence is None:
+                first_sequence = current_sequence
+            else:
+                assert first_sequence == current_sequence, 'different manager plain sequences in different iterations'
+            current_sequence = []
+
     def check(self) -> None:
         if len(self.items) == 0:
             return
@@ -211,6 +375,7 @@ class ModelData:
         n_compile_time_items = sum(1 for _ in self.get_units_with_type('compile_time'))
         assert n_compile_time_items == 1, \
             f'iteration data must consists exact 1 compile_time item but there are: {n_compile_time_items}'
+        self.check_manager_plain_sequence()
 
 
 ModelInfo = namedtuple('ModelInfo', ['framework',
@@ -240,6 +405,9 @@ class ComparisonValues:
 
     def get_ratios(self):
         return (np.array(self.values2) / np.array(self.values1) - 1.0) * 100.0
+
+    def get_simple_ratios(self):
+        return (np.array(self.values2) / np.array(self.values1)) * 100.0
 
     def get_max_values(self):
         return [max(item1, item2) for item1, item2 in zip(self.values1, self.values2)]

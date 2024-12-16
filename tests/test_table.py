@@ -2,7 +2,8 @@ import unittest
 from typing import List
 from unittest.mock import MagicMock
 from ov_ts_profiler.table import (sort_table, compare_compile_time, compare_sum_transformation_time,
-                                  compare_sum_units, get_longest_unit, create_comparison_summary_table)
+                                  compare_sum_units, get_longest_unit, create_comparison_summary_table,
+                                  compare_compilation_and_plain_manager_sum_time, compare_mem_rss)
 from ov_ts_profiler.stat_utils import get_compile_time_data, get_sum_transformation_time_data, \
     get_sum_units_comparison_data, join_sum_units, Total
 from ov_ts_profiler.common_structs import ModelInfo, ModelData, Unit, ComparisonValues
@@ -518,6 +519,71 @@ class TestCreateComparisonSummaryTable(unittest.TestCase):
         self.assertEqual(table[0]['ratio mean'], 49.700854700854705)
         self.assertEqual(table[0]['ratio std'], 13.40396043366217)
         self.assertEqual(table[0]['ratio max'], 60.00000000000001)
+
+
+class TestCompareCompilationAndPlainManagerSumTime(unittest.TestCase):
+
+    def test_compare_compilation_and_plain_manager_sum_time_happy_path(self):
+        data = [
+            (ModelInfo('framework1', 'model1', 'FP32', 'config1'), 10.0, 5.0),
+            (ModelInfo('framework2', 'model2', 'FP16', 'config2'), 20.0, 10.0)
+        ]
+        header, table = compare_compilation_and_plain_manager_sum_time(data)
+        self.assertEqual(header, ['framework', 'name', 'precision', 'config', 'compilation time (sec)', 'plain manager sum time (sec)', 'ratio manager/compilation'])
+        self.assertEqual(len(table), 2)
+        self.assertEqual(table[0]['framework'], 'framework1')
+        self.assertEqual(table[0]['name'], 'model1')
+        self.assertEqual(table[0]['precision'], 'FP32')
+        self.assertEqual(table[0]['config'], 'config1')
+        self.assertEqual(table[0]['compilation time (sec)'], 10.0)
+        self.assertEqual(table[0]['plain manager sum time (sec)'], 5.0)
+        self.assertEqual(table[0]['ratio manager/compilation'], 0.5)
+
+    def test_compare_compilation_and_plain_manager_sum_time_zero_compilation_time(self):
+        data = [
+            (ModelInfo('framework1', 'model1', 'FP32', 'config1'), 0.0, 5.0)
+        ]
+        header, table = compare_compilation_and_plain_manager_sum_time(data)
+        self.assertEqual(table[0]['ratio manager/compilation'], 'N/A')
+
+    def test_compare_compilation_and_plain_manager_sum_time_empty_data(self):
+        data = []
+        header, table = compare_compilation_and_plain_manager_sum_time(data)
+        self.assertEqual(header, ['framework', 'name', 'precision', 'config', 'compilation time (sec)', 'plain manager sum time (sec)', 'ratio manager/compilation'])
+        self.assertEqual(len(table), 0)
+
+
+class TestCompareMemRss(unittest.TestCase):
+
+    def test_compare_mem_rss_happy_path(self):
+        data = [
+            (ModelInfo('framework1', 'model1', 'FP32', 'config1'), 1000, 2000),
+            (ModelInfo('framework2', 'model2', 'FP16', 'config2'), 1500, 3000)
+        ]
+        header, table = compare_mem_rss(data)
+        self.assertEqual(header, ['framework', 'name', 'precision', 'config', 'mem #1 (bytes)', 'mem #2 (bytes)', 'mem #2 - mem #1 (bytes)', 'ratio mem #2/mem #1'])
+        self.assertEqual(len(table), 2)
+        self.assertEqual(table[0]['framework'], 'framework1')
+        self.assertEqual(table[0]['name'], 'model1')
+        self.assertEqual(table[0]['precision'], 'FP32')
+        self.assertEqual(table[0]['config'], 'config1')
+        self.assertEqual(table[0]['mem #1 (bytes)'], 1000)
+        self.assertEqual(table[0]['mem #2 (bytes)'], 2000)
+        self.assertEqual(table[0]['mem #2 - mem #1 (bytes)'], 1000)
+        self.assertEqual(table[0]['ratio mem #2/mem #1'], 2.0)
+
+    def test_compare_mem_rss_zero_mem1(self):
+        data = [
+            (ModelInfo('framework1', 'model1', 'FP32', 'config1'), 0, 2000)
+        ]
+        header, table = compare_mem_rss(data)
+        self.assertEqual(table[0]['ratio mem #2/mem #1'], 'N/A')
+
+    def test_compare_mem_rss_empty_data(self):
+        data = []
+        header, table = compare_mem_rss(data)
+        self.assertEqual(header, ['framework', 'name', 'precision', 'config', 'mem #1 (bytes)', 'mem #2 (bytes)', 'mem #2 - mem #1 (bytes)', 'ratio mem #2/mem #1'])
+        self.assertEqual(len(table), 0)
 
 
 if __name__ == '__main__':
