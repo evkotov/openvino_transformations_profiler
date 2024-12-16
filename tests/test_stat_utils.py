@@ -4,7 +4,8 @@ from ov_ts_profiler.stat_utils import join_sum_units_by_name, Total, get_compari
     get_comparison_values_sum_transformation_time, get_comparison_values_sum_units, get_common_models, \
     get_total_by_unit_names_by_csv, get_sum_units_comparison_data, get_total_by_unit_names, \
     get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data, compile_time_by_iterations, \
-    get_sum_units_durations_by_iteration, get_plain_manager_time_by_iteration, get_plain_manager_gap_time_by_iteration
+    get_sum_units_durations_by_iteration, get_plain_manager_time_by_iteration, get_plain_manager_gap_time_by_iteration, \
+    join_mem_rss_by_model, join_mem_virtual_by_model
 
 from ov_ts_profiler.common_structs import ModelInfo, ModelData, Unit
 
@@ -641,6 +642,60 @@ class TestPlainManagerGapTimeByIteration(unittest.TestCase):
         self.assertEqual(result[1][0].name, 'model2')
         self.assertEqual(list(result[0][1]), [])
         self.assertEqual(list(result[1][1]), [[0.1, 0.2]])
+
+
+class TestJoinMemRssByModel(unittest.TestCase):
+    def test_join_mem_rss_by_model_with_valid_data(self):
+        model_info_mock = MagicMock()
+        model_data_mock = MagicMock()
+        model_data_mock.get_mem_rss.return_value = 1024
+        csv_data = [{model_info_mock: model_data_mock}]
+        result = list(join_mem_rss_by_model(csv_data))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][1], [1024])
+
+    def test_join_mem_rss_by_model_with_none_data(self):
+        model_info_mock = MagicMock()
+        csv_data = [{model_info_mock: None}]
+        result = list(join_mem_rss_by_model(csv_data))
+        self.assertEqual(len(result), 0)
+
+    def test_join_mem_rss_by_model_with_mixed_data(self):
+        model_info_mock = MagicMock()
+        model_data_mock1 = MagicMock()
+        model_data_mock1.get_mem_rss.return_value = 1024
+        model_data_mock2 = MagicMock()
+        model_data_mock2.get_mem_rss.return_value = None
+        csv_data = [{model_info_mock: model_data_mock1}, {model_info_mock: model_data_mock2}]
+        result = list(join_mem_rss_by_model(csv_data))
+        self.assertEqual(len(result), 0)
+
+
+class TestJoinMemVirtualByModel(unittest.TestCase):
+    def test_join_mem_virtual_by_model_with_valid_data(self):
+        model_info_mock = MagicMock()
+        model_data_mock = MagicMock()
+        model_data_mock.get_mem_virtual.return_value = 2048
+        csv_data = [{model_info_mock: model_data_mock}]
+        result = list(join_mem_virtual_by_model(csv_data))
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0][1], [2048])
+
+    def test_join_mem_virtual_by_model_with_none_data(self):
+        model_info_mock = MagicMock()
+        csv_data = [{model_info_mock: None}]
+        result = list(join_mem_virtual_by_model(csv_data))
+        self.assertEqual(len(result), 0)
+
+    def test_join_mem_virtual_by_model_with_mixed_data(self):
+        model_info_mock = MagicMock()
+        model_data_mock1 = MagicMock()
+        model_data_mock1.get_mem_virtual.return_value = 2048
+        model_data_mock2 = MagicMock()
+        model_data_mock2.get_mem_virtual.return_value = None
+        csv_data = [{model_info_mock: model_data_mock1}, {model_info_mock: model_data_mock2}]
+        result = list(join_mem_virtual_by_model(csv_data))
+        self.assertEqual(len(result), 0)
 
 
 if __name__ == '__main__':

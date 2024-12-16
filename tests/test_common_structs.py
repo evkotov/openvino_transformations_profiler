@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import MagicMock
 import numpy as np
 from ov_ts_profiler.common_structs import ComparisonValues, SummaryStats, CSVItem, Unit, \
     make_model_console_description
@@ -637,6 +638,29 @@ class TestModelData(unittest.TestCase):
         with self.assertRaises(AssertionError):
             model_data.get_manager_plain_sequence_median_gap_sum_by_iteration()
 
+    def test_get_mem_rss_with_valid_data(self):
+        model_data = ModelData()
+        unit_mock = MagicMock()
+        unit_mock.get_durations.return_value = [100]
+        model_data.get_units_with_type = MagicMock(return_value=iter([unit_mock]))
+        self.assertEqual(model_data.get_mem_rss(), 100)
+
+    def test_get_mem_rss_with_no_data(self):
+        model_data = ModelData()
+        model_data.get_units_with_type = MagicMock(return_value=iter([]))
+        self.assertEqual(model_data.get_mem_rss(), 0)
+
+    def test_get_mem_virtual_with_valid_data(self):
+        model_data = ModelData()
+        unit_mock = MagicMock()
+        unit_mock.get_durations.return_value = [200]
+        model_data.get_units_with_type = MagicMock(return_value=iter([unit_mock]))
+        self.assertEqual(model_data.get_mem_virtual(), 200)
+
+    def test_get_mem_virtual_with_no_data(self):
+        model_data = ModelData()
+        model_data.get_units_with_type = MagicMock(return_value=iter([]))
+        self.assertEqual(model_data.get_mem_virtual(), 0)
 
 class TestMakeModelConsoleDescription(unittest.TestCase):
 

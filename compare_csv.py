@@ -9,16 +9,17 @@ from typing import List, Dict, Optional
 from ov_ts_profiler.output_utils import print_summary_stats, make_model_file_name, NoOutput, CSVOutput, ConsoleTableOutput
 from ov_ts_profiler.parse_input import get_csv_data, get_input_csv_files
 from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description
-from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations
+from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations, PlotOutputRatioSimple
 from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, filter_common_models, get_device, \
     get_all_models, \
     compile_time_by_iterations, get_sum_units_durations_by_iteration, get_compile_time_data, \
     get_sum_transformation_time_data, get_sum_units_comparison_data, join_sum_units, join_sum_units_by_name, \
     get_comparison_values_compile_time, get_comparison_values_sum_transformation_time, \
     get_comparison_values_sum_units, get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data, \
-    get_plain_manager_time_by_iteration, get_plain_manager_gap_time_by_iteration
+    get_plain_manager_time_by_iteration, get_plain_manager_gap_time_by_iteration, \
+    join_mem_rss_by_model, join_mem_virtual_by_model
 from ov_ts_profiler.table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
-    create_comparison_summary_table
+    create_comparison_summary_table, compare_compilation_and_plain_manager_sum_time, compare_mem_rss
 
 
 class SingleOutputFactory(ABC):
@@ -177,6 +178,8 @@ class PlotCompareSumPlainManagerTime(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         print('comparing sum manager plain time plot ...')
         # CSV files can store different models info
+        if not csv_data:
+            return
         sum_ts_data = list(get_sum_plain_manager_time_data(csv_data))
         comparison_values = get_comparison_values_sum_transformation_time(sum_ts_data)
         self.__plot_output.plot(comparison_values)
@@ -199,6 +202,125 @@ class CompareSumPlainManagerTime(DataProcessor):
         if self.__summary_stats:
             comparison_values = get_comparison_values_sum_transformation_time(sum_data)
             print_summary_stats(comparison_values)
+
+
+class PlotCompareCompilationAndSumPlainManagerTime(DataProcessor):
+    def __init__(self, plot_output: PlotOutput):
+        super().__init__(None)
+        self.__plot_output = plot_output
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing compilation and sum plain manager time ...')
+        # CSV files can store different models info
+        sum_data = list(get_sum_plain_manager_time_data(csv_data))
+        sum_data_d = {item[0]: item[1][0] for item in sum_data if item[1]}
+        compile_time_data = list(get_compile_time_data(csv_data))
+        compile_time_data_d = {item[0]: item[1][0] for item in compile_time_data if item[1]}
+        comparison_values = ComparisonValues('sec')
+        for model_info in sum_data_d:
+            if model_info not in compile_time_data_d:
+                continue
+            compile_value = compile_time_data_d[model_info]
+            if compile_value is None:
+                continue
+            sum_value = sum_data_d[model_info] / 1_000
+            assert sum_value < compile_value
+            comparison_values.add(compile_value, sum_value)
+        self.__plot_output.plot(comparison_values)
+
+
+class PlotCompareCompilationAndSumPlainManagerGapTime(DataProcessor):
+    def __init__(self, plot_output: PlotOutput):
+        super().__init__(None)
+        self.__plot_output = plot_output
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing compilation and sum plain manager time ...')
+        # CSV files can store different models info
+        sum_data = list(get_sum_plain_manager_gap_time_data(csv_data))
+        sum_data_d = {item[0]: item[1][0] for item in sum_data if item[1]}
+        compile_time_data = list(get_compile_time_data(csv_data))
+        compile_time_data_d = {item[0]: item[1][0] for item in compile_time_data if item[1]}
+        comparison_values = ComparisonValues('sec')
+        for model_info in sum_data_d:
+            if model_info not in compile_time_data_d:
+                continue
+            compile_value = compile_time_data_d[model_info]
+            if compile_value is None:
+                continue
+            sum_value = sum_data_d[model_info] / 1_000
+            assert sum_value < compile_value
+            comparison_values.add(compile_value, sum_value)
+        self.__plot_output.plot(comparison_values)
+
+
+class CompareCompilationAndSumPlainManagerTime(DataProcessor):
+    def __init__(self, output_factory: SingleOutputFactory):
+        super().__init__(output_factory)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing compilation and sum plain manager time ...')
+        # CSV files can store different models info
+        n_csv_files = len(csv_data)
+        sum_data = list(get_sum_plain_manager_time_data(csv_data))
+        sum_data_d = {item[0]: item[1][0] for item in sum_data if item[1]}
+        compile_time_data = list(get_compile_time_data(csv_data))
+        compile_time_data_d = {item[0]: item[1][0] for item in compile_time_data if item[1]}
+        table_data = []
+        comparison_values = ComparisonValues('sec')
+        for model_info in sum_data_d:
+            if model_info not in compile_time_data_d:
+                continue
+            compile_value = compile_time_data_d[model_info]
+            if compile_value is None:
+                continue
+            sum_value = sum_data_d[model_info] / 1_000
+            assert sum_value <= compile_value
+            comparison_values.add(compile_value, sum_value)
+            table_data.append((model_info, compile_value, sum_value))
+        header, table = compare_compilation_and_plain_manager_sum_time(table_data)
+        with self.output_factory.create_table(header) as output:
+            output.write(table)
+
+
+class CompareMemRSS(DataProcessor):
+    def __init__(self, output_factory: SingleOutputFactory):
+        super().__init__(output_factory)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing memory RSS ...')
+        # CSV files can store different models info
+        n_csv_files = len(csv_data)
+        if n_csv_files != 2:
+            return
+        comparison_values = ComparisonValues('bytes')
+        table_data = []
+        for model_info, mem_values in join_mem_rss_by_model(csv_data):
+            comparison_values.add(mem_values[0], mem_values[1])
+            table_data.append((model_info, mem_values[0], mem_values[1]))
+        header, table = compare_mem_rss(table_data)
+        with self.output_factory.create_table(header) as output:
+            output.write(table)
+
+
+class CompareMemVirtual(DataProcessor):
+    def __init__(self, output_factory: SingleOutputFactory):
+        super().__init__(output_factory)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing virtual memory ...')
+        # CSV files can store different models info
+        n_csv_files = len(csv_data)
+        if n_csv_files != 2:
+            return
+        comparison_values = ComparisonValues('bytes')
+        table_data = []
+        for model_info, mem_values in join_mem_virtual_by_model(csv_data):
+            comparison_values.add(mem_values[0], mem_values[1])
+            table_data.append((model_info, mem_values[0], mem_values[1]))
+        header, table = compare_mem_rss(table_data)
+        with self.output_factory.create_table(header) as output:
+            output.write(table)
 
 
 class PlotCompareSumPlainManagerGapTime(DataProcessor):
@@ -257,7 +379,7 @@ class GenerateLongestUnitsPerModel(DataProcessor):
         print(f'aggregating longest {self.unit_type} per model data ...')
         for model_info in get_all_models(csv_data):
             model_data = filter_by_models(csv_data, [model_info])
-            sum_units_data = get_sum_units_comparison_data(csv_data, self.unit_type)
+            sum_units_data = get_sum_units_comparison_data(model_data, self.unit_type)
             sum_units_data_all = join_sum_units(sum_units_data)
             sum_units_by_name = join_sum_units_by_name(sum_units_data_all)
             header, table = get_longest_unit(sum_units_by_name)
@@ -417,6 +539,11 @@ class Config:
     plot_compare_plain_manager_gap_sum_time: bool = False
     plot_plain_time_by_iteration: bool = False
     plot_plain_gap_time_by_iteration: bool = False
+    plot_compare_compile_vs_plain_time: bool = False
+    compare_compile_vs_plain_time: Optional[str] = None
+    plot_compare_compile_vs_plain_gap_time: bool = False
+    compare_mem_rss: Optional[str] = None
+    compare_mem_virtual: Optional[str] = None
 
 
 def parse_args() -> Config:
@@ -641,6 +768,23 @@ Plot graph with Y - sum plain manager time and X - iteration number
 Plot graph with Y - sum plain manager gap time and X - iteration number
 {script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_plain_gap_time_by_iteration
 ''')
+    args_parser.add_argument('--plot_compare_compile_vs_plain_time', action='store_true',
+                             help=f'''
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_compare_compile_vs_plain_time
+''')
+    args_parser.add_argument('--compare_compile_vs_plain_time', nargs='?', type=str, default=None,
+                             const='compare_compile_vs_plain_time',
+                             help='compare compile time and plain manager time')
+    args_parser.add_argument('--plot_compare_compile_vs_plain_gap_time', action='store_true',
+                             help=f'''
+{script_bin} --inputs /dir1/file1.csv,/dir2/file2.csv --plot_compare_compile_vs_plain_gap_time
+''')
+    args_parser.add_argument('--compare_mem_rss', nargs='?', type=str, default=None,
+                             const='compare_mem_rss',
+                             help='compare RSS memory between 2 input files')
+    args_parser.add_argument('--compare_mem_virtual', nargs='?', type=str, default=None,
+                             const='compare_mem_virtual',
+                             help='compare virtual memory between 2 input files')
 
     args = args_parser.parse_args()
     if not args.input:
@@ -698,6 +842,13 @@ Plot graph with Y - sum plain manager gap time and X - iteration number
         config.plot_plain_time_by_iteration = True
     if args.plot_plain_gap_time_by_iteration:
         config.plot_plain_gap_time_by_iteration = True
+    if args.plot_compare_compile_vs_plain_time:
+        config.plot_compare_compile_vs_plain_time = True
+    config.compare_compile_vs_plain_time = args.compare_compile_vs_plain_time
+    if args.plot_compare_compile_vs_plain_gap_time:
+        config.plot_compare_compile_vs_plain_gap_time = True
+    config.compare_mem_rss = args.compare_mem_rss
+    config.compare_mem_virtual = args.compare_mem_virtual
 
     return config
 
@@ -867,6 +1018,50 @@ def build_data_processors(config):
         data_processors.append(PlotPlainManagerTimeByIteration())
     if config.plot_plain_gap_time_by_iteration:
         data_processors.append(PlotPlainManagerGapTimeByIteration())
+
+    if config.plot_compare_compile_vs_plain_time:
+        path_prefix = 'compare_compile_plain'
+        if not path_prefix:
+            path_prefix = 'compare_compile_plain'
+        title_prefix = ''
+        plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
+        plot_ratio = PlotOutputRatioSimple()
+        plot_ratio.set_label('Transformations time / Compile Time, %')
+        plot_output_factory.set_get_ratio_func(plot_ratio)
+        plot_output_factory.set_label_y_hist('Number of Models')
+        plot_output_factory.set_label_x_scatter('Compile Time, sec')
+        data_processors.append(PlotCompareCompilationAndSumPlainManagerTime(plot_output_factory))
+
+    if config.compare_compile_vs_plain_time:
+        output_factory = create_single_output_factory(config,
+                                                      'compare_compile_plain_manager',
+                                                      'compare compile and plain manager time')
+        data_processors.append(CompareCompilationAndSumPlainManagerTime(output_factory))
+
+    if config.plot_compare_compile_vs_plain_gap_time:
+        path_prefix = 'compare_compile_plain_gap'
+        if not path_prefix:
+            path_prefix = 'compare_compile_plain_gap'
+        title_prefix = ''
+        plot_output_factory = PlotOutput(path_prefix, title_prefix, config.n_plot_segments)
+        plot_ratio = PlotOutputRatioSimple()
+        plot_ratio.set_label('Transformations time / Compile Time, %')
+        plot_output_factory.set_get_ratio_func(plot_ratio)
+        plot_output_factory.set_label_y_hist('Number of Models')
+        plot_output_factory.set_label_x_scatter('Compile Time, sec')
+        data_processors.append(PlotCompareCompilationAndSumPlainManagerGapTime(plot_output_factory))
+
+    if config.compare_mem_rss:
+        output_factory = create_single_output_factory(config,
+                                                      'compare_mem_rss',
+                                                      'compare memory rss')
+        data_processors.append(CompareMemRSS(output_factory))
+
+    if config.compare_mem_virtual:
+        output_factory = create_single_output_factory(config,
+                                                      'compare_mem_virtual',
+                                                      'compare memory virtual')
+        data_processors.append(CompareMemVirtual(output_factory))
 
     return data_processors
 

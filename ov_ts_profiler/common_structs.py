@@ -31,7 +31,8 @@ class Unit:
     def __init__(self, csv_item: CSVItem):
         self.name = None
         self.device = csv_item.device
-        assert csv_item.type in ['compile_time', 'transformation', 'manager', 'manager_start', 'manager_end']
+        assert csv_item.type in ['compile_time', 'transformation', 'manager',
+                                 'manager_start', 'manager_end', 'mem_rss', 'mem_virtual']
         if csv_item.type == 'transformation':
             self.name = csv_item.transformation_name
         elif csv_item.type == 'manager' or csv_item.type == 'manager_start' or csv_item.type == 'manager_end':
@@ -162,6 +163,20 @@ class ModelData:
 
     def get_units_with_type(self, type_name: str) -> Iterator[Unit]:
         return self.get_units(lambda item: item.type == type_name)
+
+    def get_mem_rss(self) -> int:
+        try:
+            item = next(self.get_units_with_type('mem_rss'))
+            return int(item.get_durations()[0])
+        except StopIteration:
+            return 0
+
+    def get_mem_virtual(self) -> int:
+        try:
+            item = next(self.get_units_with_type('mem_virtual'))
+            return int(item.get_durations()[0])
+        except StopIteration:
+            return 0
 
     def __make_manager_plain_sequence(self) -> List[Tuple[Unit, Unit]]:
         manager_timestamp_units = list(self.get_units_with_type('manager_start'))
@@ -390,6 +405,9 @@ class ComparisonValues:
 
     def get_ratios(self):
         return (np.array(self.values2) / np.array(self.values1) - 1.0) * 100.0
+
+    def get_simple_ratios(self):
+        return (np.array(self.values2) / np.array(self.values1)) * 100.0
 
     def get_max_values(self):
         return [max(item1, item2) for item1, item2 in zip(self.values1, self.values2)]

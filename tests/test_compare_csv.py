@@ -12,7 +12,8 @@ from compare_csv import (CSVSingleFileOutputFactory, ConsoleTableSingleFileOutpu
                          CompareSumUnitsPerModel, PlotCompileTimeByIteration, PlotSumTSTimeByIteration,
                          parse_args, create_single_output_factory, SingleNoOutputFactory, Config,
                          create_multi_output_factory, create_summary_output_factory, build_data_processors,
-                         PlotCompareCompileTime, PlotCompareSumTransformationTime, PlotCompareSumUnitsOverall)
+                         PlotCompareCompileTime, PlotCompareSumTransformationTime, PlotCompareSumUnitsOverall,
+                         PlotCompareSumPlainManagerTime)
 
 
 class TestCreateRatioStatsTable(unittest.TestCase):
@@ -960,6 +961,37 @@ class TestPlotCompareSumUnitsOverall(unittest.TestCase):
         processor.run(csv_data)
 
         mock_plot_output.plot.assert_not_called()
+
+
+class TestPlotCompareSumPlainManagerTime(unittest.TestCase):
+    def test_plot_sum_plain_manager_time_with_valid_data(self):
+        plot_output_mock = MagicMock()
+        data_processor = PlotCompareSumPlainManagerTime(plot_output_mock)
+        model_info_mock = MagicMock()
+        model_data_mock = MagicMock()
+        csv_data = [{model_info_mock: model_data_mock}]
+        model_data_mock.get_mem_virtual.return_value = 2048
+        data_processor.run(csv_data)
+        plot_output_mock.plot.assert_called_once()
+
+    def test_plot_sum_plain_manager_time_with_no_data(self):
+        plot_output_mock = MagicMock()
+        data_processor = PlotCompareSumPlainManagerTime(plot_output_mock)
+        csv_data = []
+        data_processor.run(csv_data)
+        plot_output_mock.plot.assert_not_called()
+
+    def test_plot_sum_plain_manager_time_with_mixed_data(self):
+        plot_output_mock = MagicMock()
+        data_processor = PlotCompareSumPlainManagerTime(plot_output_mock)
+        model_info_mock = MagicMock()
+        model_data_mock1 = MagicMock()
+        model_data_mock2 = MagicMock()
+        csv_data = [{model_info_mock: model_data_mock1}, {model_info_mock: model_data_mock2}]
+        model_data_mock1.get_mem_virtual.return_value = 2048
+        model_data_mock2.get_mem_virtual.return_value = None
+        data_processor.run(csv_data)
+        plot_output_mock.plot.assert_called_once()
 
 
 if __name__ == "__main__":

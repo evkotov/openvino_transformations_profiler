@@ -285,3 +285,19 @@ def join_sum_units_by_name(data: Dict[str, List[Optional[Total]]]) -> Dict[str, 
             if total is not None:
                 result[name].append(total)
     return result
+
+
+def join_mem_rss_by_model(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[int]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        values = [model_data.get_mem_rss() if model_data is not None else None for model_data in model_data_items]
+        if not all(item is not None for item in values):
+            continue
+        yield model_info, [model_data.get_mem_rss() if model_data is not None else None for model_data in model_data_items]
+
+
+def join_mem_virtual_by_model(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[int]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        values = [model_data.get_mem_virtual() if model_data is not None else None for model_data in model_data_items]
+        if not all(item is not None for item in values):
+            continue
+        yield model_info, values
