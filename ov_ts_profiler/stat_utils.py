@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Dict, Set, Iterator, Tuple, Optional
+from typing import List, Dict, Set, Iterator, Tuple, Optional, Any
 
 import numpy as np
 
@@ -301,3 +301,24 @@ def join_mem_virtual_by_model(csv_data: List[Dict[ModelInfo, ModelData]]) -> Ite
         if not all(item is not None for item in values):
             continue
         yield model_info, values
+
+
+def get_debug_mem_rss(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[Dict[str, Any]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        data_dicts = (data.get_debug_units_with_type('mem_usage') for data in model_data_items
+                     if data is not None)
+        yield model_info, data_dicts
+
+
+def get_debug_vmpeak(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[Dict[str, Any]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        data_dicts = (data.get_debug_units_with_type('mem_vm_peak_usage') for data in model_data_items
+                     if data is not None)
+        yield model_info, data_dicts
+
+
+def get_debug_mem_rss_and_shared(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, Iterator[Dict[str, Any]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        data_dicts = (data.get_debug_units_with_type('mem_rss_and_shared_usage') for data in model_data_items
+                     if data is not None)
+        yield model_info, data_dicts

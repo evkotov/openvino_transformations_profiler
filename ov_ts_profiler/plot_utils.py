@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections import namedtuple
-from typing import List, Tuple, Optional, Iterator
+from typing import List, Tuple, Optional, Iterator, Dict, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,6 +33,10 @@ class Plot:
         self.__legends = []
         self.__gen_x_ticks_func = None
         self.__stripe_none_line = None
+        self.__in_subplot = False
+
+    def set_as_sublot(self):
+        self.__in_subplot = True
 
     def append_legend(self, label: str):
         self.__legends.append(label)
@@ -55,14 +59,18 @@ class Plot:
     def append_x_line(self, y_value: float, label: str, color: str, style: str):
         self.__x_lines.append(Xline(y_value, label, color, style))
 
-    def set_plot_size(self, size: Tuple[int, int]) -> None:
+    def set_plot_size(self, size: Optional[Tuple[int, int]]) -> None:
         self.__plot_size = size
 
-    def plot(self, path: str):
+    def set_title(self, title: str):
+        self.__title = title
+
+    def plot(self, path: Optional[str]):
         plt.rcParams.update({'font.size': 14})  # Set global font size
         need_a_legend = False
 
-        plt.figure(figsize=self.__plot_size)
+        if self.__plot_size is not None:
+            plt.figure(figsize=self.__plot_size)
 
         all_x_values = set()
         for graph_item in self.__graphs:
@@ -110,11 +118,28 @@ class Plot:
         if need_a_legend:
             plt.legend()
 
-        # Show the graph
-        plt.grid(True)
-        plt.savefig(path)
-        # Close the plot so it doesn't show up
-        plt.close()
+        if not self.__in_subplot and path:
+            # Show the graph
+            plt.grid(True)
+            plt.savefig(path)
+            # Close the plot so it doesn't show up
+            plt.close()
+
+
+def save_subplots(plots: List[Plot], path: str):
+    num_subplots = len(plots)
+    plt.figure(figsize=(8, 5 * num_subplots))
+    for i, plot in enumerate(plots):
+        plot.set_as_sublot()
+        plot.set_plot_size(None)
+        plt.subplot(num_subplots, 1, i + 1)
+        plot.plot(None)
+    # Adjust the layout to avoid overlapping elements
+    plt.tight_layout()
+    plt.savefig(path)
+    # Close the plot so it doesn't show up
+    plt.close()
+
 
 class Hist:
     def __init__(self, title: str, x_label: str, y_label: str):
@@ -341,7 +366,7 @@ class PlotOutput:
 def gen_plot_time_by_iterations(output_dir: str,
                                                      device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
                                                      what: str, file_prefix: str):
-    title = f'{what} {device} {model_info.framework} {model_info.name} {model_info.precision}'
+    title = f'{what}{device}\n{model_info.framework} {model_info.name} {model_info.precision}'
     if model_info.config:
         title += f' {model_info.config}'
     x_label = 'iteration number'
@@ -377,6 +402,61 @@ def gen_plot_time_by_iterations(output_dir: str,
         lower_bound = median_value - deviation
         upper_bound = median_value + deviation
         plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
+
+    path = os.path.join(output_dir, f'{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
+    if model_info.config:
+        path += f'_{model_info.config}'
+    path += f'_{file_prefix}'
+    path += '.png'
+    plot.plot(path)
+
+
+def gen_plot_debug_items(output_dir: str,
+                        device: str, model_info: ModelInfo, model_data_items: List[Tuple[float, float]],
+                        what: str, file_prefix: str):
+    #title = f'{what} {device}\n{model_info.name} {model_info.precision}'
+    title = ''
+    x_label = 'seconds'
+    y_label = f'{what} (Mb)'
+
+    plot = Plot(title, x_label, y_label)
+    plot.set_plot_size((10, 8))
+
+    for single_csv_items in model_data_items:
+        x_values = [item[0] for item in single_csv_items]
+        y_values = [item[1] for item in single_csv_items]
+        plot.add(x_values, y_values)
+     
+    path = os.path.join(output_dir, f'{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
+    if model_info.config:
+        path += f'_{model_info.config}'
+    path += f'_{file_prefix}'
+    path += '.png'
+    plot.plot(path)
+
+
+def gen_CompareCompileTimeWithBenchmarking(output_dir: str,
+                                device: str, model_info: ModelInfo, model_data_list: List[List[Optional[float]]],
+                                what: str, file_prefix: str):
+    title = f'{what}{device}\n{model_info.framework} {model_info.name} {model_info.precision}'
+    if model_info.config:
+        title += f' {model_info.config}'
+    x_label = 'iteration number'
+    y_label = f'{what} (seconds)'
+
+    plot = Plot(title, x_label, y_label)
+    plot.set_x_ticks_func(generate_x_ticks_cast_to_int)
+
+    for durations in model_data_list:
+        y_values = []
+        x_values = []
+        for i, duration in enumerate(durations):
+            if duration is None:
+                continue
+            y_values.append(duration)
+            x_values.append(i + 1)
+        assert len(y_values) == len(x_values)
+        plot.add(x_values, y_values)
 
     path = os.path.join(output_dir, f'{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
     if model_info.config:

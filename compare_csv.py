@@ -8,8 +8,9 @@ from typing import List, Dict, Optional
 
 from ov_ts_profiler.output_utils import print_summary_stats, make_model_file_name, NoOutput, CSVOutput, ConsoleTableOutput
 from ov_ts_profiler.parse_input import get_csv_data, get_input_csv_files
-from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description
-from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations, PlotOutputRatioSimple
+from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description, full_join_by_model_info
+from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations, PlotOutputRatioSimple, gen_plot_debug_items, \
+    gen_CompareCompileTimeWithBenchmarking
 from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, filter_common_models, get_device, \
     get_all_models, \
     compile_time_by_iterations, get_sum_units_durations_by_iteration, get_compile_time_data, \
@@ -17,7 +18,7 @@ from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, fi
     get_comparison_values_compile_time, get_comparison_values_sum_transformation_time, \
     get_comparison_values_sum_units, get_sum_plain_manager_time_data, get_sum_plain_manager_gap_time_data, \
     get_plain_manager_time_by_iteration, get_plain_manager_gap_time_by_iteration, \
-    join_mem_rss_by_model, join_mem_virtual_by_model
+    join_mem_rss_by_model, join_mem_virtual_by_model, get_debug_mem_rss, get_debug_vmpeak, get_debug_mem_rss_and_shared
 from ov_ts_profiler.table import compare_compile_time, compare_sum_transformation_time, get_longest_unit, compare_sum_units, \
     create_comparison_summary_table, compare_compilation_and_plain_manager_sum_time, compare_mem_rss
 
@@ -505,6 +506,82 @@ class PlotPlainManagerGapTimeByIteration(DataProcessor):
         device = get_device(csv_data)
         for model_info, durations in get_plain_manager_gap_time_by_iteration(csv_data):
             gen_plot_time_by_iterations('.', device, model_info, durations, 'Plain manager gap time', 'plain_manager_gap_time')
+
+
+class PlotMemRSSDebug(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, mem_rss in get_debug_mem_rss(csv_data):
+            values = [[(unit.get_status()['timestamp_ns'], unit.get_status()['rss_bytes_used']) for unit in mem_rss_one_csv] for mem_rss_one_csv in mem_rss]
+            # normalize timestamps
+            min_timestamp = min((pair[0] for single_csv_values in values for pair in single_csv_values))
+            values = [[(pair[0] - min_timestamp, pair[1]) for pair in single_csv_values] for single_csv_values in values]
+            # to seconds
+            values = [[(pair[0] / 1_000_000_000, pair[1]) for pair in single_csv_values] for single_csv_values in values]
+            # to megabytes
+            values = [[(pair[0], pair[1] / (1024 * 1024)) for pair in single_csv_values] for single_csv_values in values]
+            gen_plot_debug_items('.', device, model_info, values, 'memory consumption RSS', 'mem_rss_debug')
+
+
+class PlotVMpeakDebug(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, mem_rss in get_debug_vmpeak(csv_data):
+            values = [[(unit.get_status()['timestamp_ns'], unit.get_status()['bytes_used']) for unit in mem_rss_one_csv] for mem_rss_one_csv in mem_rss]
+            print(values)
+            # normalize timestamps
+            min_timestamp = min((pair[0] for single_csv_values in values for pair in single_csv_values))
+            values = [[(pair[0] - min_timestamp, pair[1]) for pair in single_csv_values] for single_csv_values in values]
+            # to seconds
+            values = [[(pair[0] / 1_000_000_000, pair[1]) for pair in single_csv_values] for single_csv_values in values]
+            # to megabytes
+            values = [[(pair[0], pair[1] / (1024 * 1024)) for pair in single_csv_values] for single_csv_values in values]
+            gen_plot_debug_items('.', device, model_info, values, 'memory consumption RSS', 'mem_vmpeak')
+
+
+class PlotMemRSSAndSharedDebug(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, mem_rss in get_debug_mem_rss_and_shared(csv_data):
+            values = [[(unit.get_status()['timestamp_ns'], unit.get_status()['bytes_used']) for unit in mem_rss_one_csv] for mem_rss_one_csv in mem_rss]
+            # normalize timestamps
+            min_timestamp = min((pair[0] for single_csv_values in values for pair in single_csv_values))
+            values = [[(pair[0] - min_timestamp, pair[1]) for pair in single_csv_values] for single_csv_values in values]
+            # to seconds
+            values = [[(pair[0] / 1_000_000_000, pair[1]) for pair in single_csv_values] for single_csv_values in values]
+            # to megabytes
+            values = [[(pair[0], pair[1] / (1024 * 1024)) for pair in single_csv_values] for single_csv_values in values]
+            gen_plot_debug_items('.', device, model_info, values, 'memory consumption RSS', 'mem_rss_and_shared_debug')
+
+
+class PlotCompareCompileTimeWithBenchmarking(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def get_compile_time_data(self, data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
+        for model_info, model_data_items in full_join_by_model_info(data):
+            compile_times = [
+                (model_data.get_compile_durations()[0] / 1_000_000_000 if model_data is not None and len(model_data.get_compile_durations()) != 0 else None)
+                for model_data in model_data_items
+            ]
+            yield model_info, compile_times
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        print('comparing compile time ...')
+        device = get_device(csv_data)
+        # CSV files can store different models info
+        for model_info, model_data_iter in self.get_compile_time_data(csv_data):
+            model_data_list = list(model_data_iter)
+            gen_CompareCompileTimeWithBenchmarking('.', device, model_info, [model_data_list], 'compilation', 'compilation')
 
 
 @dataclass
@@ -1062,6 +1139,11 @@ def build_data_processors(config):
                                                       'compare_mem_virtual',
                                                       'compare memory virtual')
         data_processors.append(CompareMemVirtual(output_factory))
+
+    #data_processors.append(PlotMemRSSDebug())
+    #data_processors.append(PlotVMpeakDebug())
+    #data_processors.append(PlotMemRSSAndSharedDebug())
+    data_processors.append(PlotCompareCompileTimeWithBenchmarking())
 
     return data_processors
 

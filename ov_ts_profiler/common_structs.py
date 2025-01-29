@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
+
 from collections import namedtuple, deque
-from typing import Optional, List, Iterator, Dict, Tuple
+from typing import Optional, List, Iterator, Dict, Tuple, Any
 
 import numpy as np
 
@@ -32,7 +34,8 @@ class Unit:
         self.name = None
         self.device = csv_item.device
         assert csv_item.type in ['compile_time', 'transformation', 'manager',
-                                 'manager_start', 'manager_end', 'mem_rss', 'mem_virtual']
+                                 'manager_start', 'manager_end', 'mem_rss', 'mem_virtual', 'monitor_debug'], f'{csv_item.type}'
+    
         if csv_item.type == 'transformation':
             self.name = csv_item.transformation_name
         elif csv_item.type == 'manager' or csv_item.type == 'manager_start' or csv_item.type == 'manager_end':
@@ -117,6 +120,27 @@ class Unit:
         self.__duration_median = None
 
 
+class MonitorDebugUnit:
+    def __init__(self, csv_item: CSVItem):
+        self.name = None
+        self.device = csv_item.device
+        assert csv_item.type == 'monitor'
+        if csv_item.type == 'transformation':
+            self.name = csv_item.transformation_name
+        elif csv_item.type == 'manager' or csv_item.type == 'manager_start' or csv_item.type == 'manager_end':
+            self.name = csv_item.manager_name
+        self.model_path = csv_item.model_path
+        self.model_framework = csv_item.model_framework
+        self.model_precision = csv_item.model_precision
+        self.type = csv_item.type
+        self.transformation_name = csv_item.transformation_name
+        self.manager_name = csv_item.manager_name
+        self.status = json.loads(csv_item.status)
+
+    def get_status(self) -> Dict[str, Any]:
+        return self.status
+
+
 UnitInfo = namedtuple('UnitInfo', ['type',
                                    'transformation_name',
                                    'manager_name'])
@@ -125,6 +149,7 @@ UnitInfo = namedtuple('UnitInfo', ['type',
 class ModelData:
     def __init__(self):
         self.items: List[Unit] = []
+        self.debug_items: List[MonitorDebugUnit] = []
         self.__item_last_idx = None
         self.__last_iter_num: int = 0
         self.__manager_plain_sequence: Optional[List[Tuple[Unit, Unit]]] = None
@@ -133,6 +158,9 @@ class ModelData:
         self.__manager_plain_sequence_sum_by_iteration: Optional[List[float]] = None
         self.__manager_plain_sequence_median_gap_sum_by_iteration: Optional[List[float]] = None
         self.__manager_plain_sequence_median_gap_sum: Optional[float] = None
+
+    def append_debug(self, csv_item: CSVItem) -> None:
+        self.debug_items.append(MonitorDebugUnit(csv_item))
 
     def append(self, csv_item: CSVItem) -> None:
         n_iteration = int(csv_item.iteration)
@@ -163,6 +191,14 @@ class ModelData:
 
     def get_units_with_type(self, type_name: str) -> Iterator[Unit]:
         return self.get_units(lambda item: item.type == type_name)
+
+    def get_debug_units(self, filter_item_func) -> Iterator[MonitorDebugUnit]:
+        for item in self.debug_items:
+            if filter_item_func(item):
+                yield item
+
+    def get_debug_units_with_type(self, type_name: str) -> Iterator[MonitorDebugUnit]:
+        return self.get_debug_units(lambda item: item.get_status()['type'] == type_name)
 
     def get_mem_rss(self) -> int:
         try:
@@ -306,8 +342,11 @@ class ModelData:
         return sum(unit.get_duration_median() for unit in units)
 
     def get_compile_durations(self) -> List[float]:
-        item = next(self.get_units_with_type('compile_time'))
-        return item.get_durations()
+        try:
+            item = next(self.get_units_with_type('compile_time'))
+            return item.get_durations()
+        except StopIteration:
+            return []
 
     def get_duration(self, i: int) -> float:
         return self.items[i].get_duration_median()

@@ -58,9 +58,6 @@ def read_csv(path: str) -> Iterator[CSVItem]:
         has_device = 'device' in column_names
         has_status = 'status' in column_names
         for row in csv_reader:
-            # if it's header inside CSV file
-            if row[-1] == 'duration':
-                continue
             if not has_device:
                 row.insert(0, 'N/A')
             if not has_config:
@@ -72,6 +69,9 @@ def read_csv(path: str) -> Iterator[CSVItem]:
                 row[5] = get_config_value_from_path(model_path, config_values_cache)
             try:
                 csv_item = CSVItem(*row)
+                # if it's header inside CSV file
+                if csv_item.iteration == 'iteration':
+                    continue
             except:
                 print(f'exception in row {row}')
                 raise
@@ -96,7 +96,10 @@ def read_csv_data(csv_rows: Iterator[CSVItem]) -> Dict[ModelInfo, ModelData]:
             '''
             assert last_model_info is None or last_model_info == model_info, \
                 f'duplicate of {model_info} in CSV'
-        data[model_info].append(item)
+        if item.type == 'monitor':
+            data[model_info].append_debug(item)
+        else:
+            data[model_info].append(item)
         last_model_info = model_info
     return data
 
