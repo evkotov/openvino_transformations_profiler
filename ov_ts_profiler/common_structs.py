@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 
 from collections import namedtuple, deque
+from datetime import datetime, timezone, timedelta
+from itertools import tee
 from typing import Optional, List, Iterator, Dict, Tuple, Any
 
 import numpy as np
@@ -34,8 +36,7 @@ class Unit:
         self.name = None
         self.device = csv_item.device
         assert csv_item.type in ['compile_time', 'transformation', 'manager',
-                                 'manager_start', 'manager_end', 'mem_rss', 'mem_virtual', 'monitor_debug'], f'{csv_item.type}'
-    
+                                 'manager_start', 'manager_end', 'mem_rss', 'mem_virtual'], f'{csv_item.type}'
         if csv_item.type == 'transformation':
             self.name = csv_item.transformation_name
         elif csv_item.type == 'manager' or csv_item.type == 'manager_start' or csv_item.type == 'manager_end':
@@ -112,7 +113,7 @@ class Unit:
         assert self.model_path == csv_item.model_path
         assert self.model_framework == csv_item.model_framework
         assert self.model_precision == csv_item.model_precision
-        assert self.type == csv_item.type
+        assert self.type == csv_item.type, f'{self.type} != {csv_item.type}'
         assert self.transformation_name == csv_item.transformation_name
         assert self.manager_name == csv_item.manager_name
         assert self.status == csv_item.status
@@ -149,7 +150,8 @@ UnitInfo = namedtuple('UnitInfo', ['type',
 class ModelData:
     def __init__(self):
         self.items: List[Unit] = []
-        self.debug_items: List[MonitorDebugUnit] = []
+        self.monitor_items: List[MonitorDebugUnit] = []
+        self.mem_rss_items: List[Unit] = []
         self.__item_last_idx = None
         self.__last_iter_num: int = 0
         self.__manager_plain_sequence: Optional[List[Tuple[Unit, Unit]]] = None
@@ -158,11 +160,17 @@ class ModelData:
         self.__manager_plain_sequence_sum_by_iteration: Optional[List[float]] = None
         self.__manager_plain_sequence_median_gap_sum_by_iteration: Optional[List[float]] = None
         self.__manager_plain_sequence_median_gap_sum: Optional[float] = None
-
-    def append_debug(self, csv_item: CSVItem) -> None:
-        self.debug_items.append(MonitorDebugUnit(csv_item))
+        self.__measurement_time = None
+        self.__measurement_date = None
 
     def append(self, csv_item: CSVItem) -> None:
+        if csv_item.type == "monitor":
+            return self.__append_monitor(csv_item)
+        if csv_item.type == "mem_rss":
+            return self.__append_mem_rss(csv_item)
+        return self.__append_item(csv_item)
+
+    def __append_item(self, csv_item: CSVItem) -> None:
         n_iteration = int(csv_item.iteration)
         assert n_iteration > 0
         assert n_iteration >= self.__last_iter_num, \
@@ -179,6 +187,12 @@ class ModelData:
             else:
                 self.__item_last_idx += 1
             self.items[self.__item_last_idx].add(csv_item)
+
+    def __append_monitor(self, csv_item: CSVItem) -> None:
+        self.monitor_items.append(MonitorDebugUnit(csv_item))
+
+    def __append_mem_rss(self, csv_item: CSVItem) -> None:
+        self.mem_rss_items.append(Unit(csv_item))
 
     def get_device(self):
         # assume that all data were collected on one device
@@ -416,11 +430,54 @@ class ModelData:
             f'iteration data must consists exact 1 compile_time item but there are: {n_compile_time_items}'
         self.check_manager_plain_sequence()
 
+    def get_start_measurement_time(self) -> Optional[datetime]:
+        return self.get_measurement_time()[0]
+
+    def get_measurement_date(self) -> Optional[datetime]:
+        if self.__measurement_date is None:
+            self.__measurement_date = self.__get_measurement_date()
+        return self.__measurement_date
+
+    def __get_measurement_date(self) -> Optional[datetime]:
+        def get_adjusted_date(dt: datetime) -> datetime.date:
+            if dt.time() < datetime.strptime("13:00", "%H:%M").time():
+                return (dt - timedelta(days=1)).date()
+            return dt.date()
+        dt = self.get_start_measurement_time()
+        if dt is None:
+            return None
+        return get_adjusted_date(dt)
+
+    def get_measurement_time(self) -> Tuple[Optional[datetime], Optional[datetime]]:
+        if self.__measurement_time is None:
+            self.__measurement_time = self.__get_measurement_time()
+        return self.__measurement_time
+
+    def __get_measurement_time(self) -> Tuple[Optional[datetime], Optional[datetime]]:
+        def get_timestamps() -> Iterator[datetime]:
+            for cur_type in ('manager_start', 'manager_end'):
+                for item in self.get_units_with_type(cur_type):
+                    for duration in item.get_durations():
+                        yield datetime.fromtimestamp(duration / 1e9, tz=timezone.utc)
+        iter1, iter2 = tee(get_timestamps())
+        min_value = min(iter1, default=None)
+        max_value = max(iter2, default=None)
+        return min_value, max_value
+
 
 ModelInfo = namedtuple('ModelInfo', ['framework',
                                      'name',
                                      'precision',
                                      'config'])
+
+
+def get_measurement_date(data: Dict[ModelInfo, ModelData]) -> Optional[datetime]:
+    dates = [item.get_measurement_date() for item in data.values()]
+    if not dates:
+        return None
+    first_date = dates[0]
+    assert all(date == first_date for date in dates), "Not all dates are the same"
+    return first_date
 
 
 SummaryStats = namedtuple('SummaryStats', ['delta_median', 'delta_mean', 'delta_std', 'delta_max_abs',

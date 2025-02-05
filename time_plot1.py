@@ -223,17 +223,23 @@ class PlotCompareCompileTimeWithBenchmarking:
 
 
 ts_stats_inputs = [
-    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/04.5_cpu.zip.dir/archive/CONCATED.csv',
     '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/04.1_cpu.zip.dir/archive/CONCATED.csv',
     '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/04.2_cpu.zip.dir/archive/CONCATED.csv',
-    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/04.4_cpu.zip.dir/archive/CONCATED.csv'
+    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/04.4_cpu.zip.dir/archive/CONCATED.csv',
+    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/04.5_cpu.zip.dir/archive/CONCATED.csv',
+    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/05.2_cpu.zip.dir/archive/CONCATED.csv',
+    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/05.3_cpu.zip.dir/archive/CONCATED.csv',
+    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/05.4_cpu.zip.dir/archive/CONCATED.csv',
+    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/05.5_cpu.zip.dir/archive/CONCATED.csv',
+    '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/06.01_cpu.zip.dir/archive/CONCATED.csv',
 ]
 
 csv_data = get_csv_data(get_input_csv_files(ts_stats_inputs))
 data_processor = PlotCompareCompileTimeWithBenchmarking()
 #data_processor.run_ts_stats(csv_data)
 
-benchmark_input = '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/Compilation time from benchmarks [s]-data-2025-01-27 18_58_21.csv'
+#benchmark_input = '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/Compilation time from benchmarks [s]-data-2025-01-27 18_58_21.csv'
+benchmark_input = '/home/ekotov/WORK/DEBUG/TRANSFORMATIONS_STATS/INPUT/nightly/28.01.2025/Compilation time from benchmarks [s]-data-2025-02-04 17_08_43.csv'
 
 
 def print_benchmark_hardware(benchmark_input: List[BenchCSVItem]):
@@ -275,7 +281,7 @@ def check_config_duplicates(csv_data: List[Dict[ModelInfo, ModelData]]):
 check_config_duplicates(csv_data)
 
 def plot_join_ts_and_benchmark(csv_data: List[Dict[ModelInfo, ModelData]], benchmark_items: List[BenchCSVItem], device: str):
-    ts_stats_data = {}
+    ts_stats_data_first_compile_time = {}
     for model_info, model_data_items in full_join_by_model_info(csv_data):
         compile_times = [
             (model_data.get_compile_durations()[0] / 1_000_000_000 if model_data is not None and len(model_data.get_compile_durations()) != 0 else None)
@@ -283,9 +289,21 @@ def plot_join_ts_and_benchmark(csv_data: List[Dict[ModelInfo, ModelData]], bench
         ]
         new_model_info = copy.deepcopy(model_info)
         new_model_info = new_model_info._replace(config = '')
-        if new_model_info not in ts_stats_data:
-            ts_stats_data[new_model_info] = []
-        ts_stats_data[new_model_info].append(compile_times)
+        if new_model_info not in ts_stats_data_first_compile_time:
+            ts_stats_data_first_compile_time[new_model_info] = []
+        ts_stats_data_first_compile_time[new_model_info].append(compile_times)
+
+    ts_stats_data_median_compile_time = {}
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        compile_times = [
+            (model_data.get_compile_time() / 1_000_000_000 if model_data is not None and model_data.get_compile_time() is not None else None)
+            for model_data in model_data_items
+        ]
+        new_model_info = copy.deepcopy(model_info)
+        new_model_info = new_model_info._replace(config = '')
+        if new_model_info not in ts_stats_data_median_compile_time:
+            ts_stats_data_median_compile_time[new_model_info] = []
+        ts_stats_data_median_compile_time[new_model_info].append(compile_times)
 
     benchmark_items = [item for item in benchmark_items if item.device == device]
     benchmark_data = {}
@@ -293,11 +311,13 @@ def plot_join_ts_and_benchmark(csv_data: List[Dict[ModelInfo, ModelData]], bench
         benchmark_data[model_info] = model_data_list
     get_benchmark_hardware_items = get_benchmark_hardware(benchmark_items)
 
-    for model_info in ts_stats_data.keys():
+    for model_info in ts_stats_data_first_compile_time.keys():
         plots = []
         if model_info not in benchmark_data:
             continue
-        plot = gen_plot_with_subplots(device, model_info, ts_stats_data[model_info], 'transformation stats compile time')
+        plot = gen_plot_with_subplots(device, model_info, ts_stats_data_first_compile_time[model_info], 'transformation stats first compile time')
+        plots.append(plot)
+        plot = gen_plot_with_subplots(device, model_info, ts_stats_data_median_compile_time[model_info], 'transformation stats median compile time')
         plots.append(plot)
         for hardware in get_benchmark_hardware_items:
             values = [item.compilation_time for item in benchmark_data[model_info] if item.system_hardware == hardware]

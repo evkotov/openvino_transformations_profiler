@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import List, Dict, Iterator
 
-from ov_ts_profiler.common_structs import ModelInfo, ModelData, CSVItem, CSVColumnNames
+from ov_ts_profiler.common_structs import ModelInfo, ModelData, CSVItem, CSVColumnNames, get_measurement_date
 
 
 def is_header_valid(column_names: List[str]) -> bool:
@@ -96,10 +96,7 @@ def read_csv_data(csv_rows: Iterator[CSVItem]) -> Dict[ModelInfo, ModelData]:
             '''
             assert last_model_info is None or last_model_info == model_info, \
                 f'duplicate of {model_info} in CSV'
-        if item.type == 'monitor':
-            data[model_info].append_debug(item)
-        else:
-            data[model_info].append(item)
+        data[model_info].append(item)
         last_model_info = model_info
     return data
 
@@ -134,6 +131,9 @@ def get_csv_data(csv_paths: List[str]) -> List[Dict[ModelInfo, ModelData]]:
         current_csv_data = remove_invalid_items(current_csv_data)
         if current_csv_data:
             csv_data.append(current_csv_data)
+        dt = get_measurement_date(current_csv_data)
+        if dt is not None:
+            print(f'  measurement date: {dt}')
     check_csv_data(csv_data)
     return csv_data
 
