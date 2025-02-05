@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from collections import namedtuple, deque
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from itertools import tee
 from typing import Optional, List, Iterator, Dict, Tuple, Any
 
@@ -438,7 +438,7 @@ class ModelData:
             self.__measurement_date = self.__get_measurement_date()
         return self.__measurement_date
 
-    def __get_measurement_date(self) -> Optional[datetime]:
+    def __get_measurement_date(self) -> Optional[date]:
         def get_adjusted_date(dt: datetime) -> datetime.date:
             if dt.time() < datetime.strptime("13:00", "%H:%M").time():
                 return (dt - timedelta(days=1)).date()

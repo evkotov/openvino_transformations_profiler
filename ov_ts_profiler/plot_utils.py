@@ -34,6 +34,7 @@ class Plot:
         self.__gen_x_ticks_func = None
         self.__stripe_none_line = None
         self.__in_subplot = False
+        self.__x_ticks_rotation = None
 
     def set_as_sublot(self):
         self.__in_subplot = True
@@ -43,6 +44,9 @@ class Plot:
 
     def set_x_ticks_func(self, func):
         self.__gen_x_ticks_func = func
+
+    def set_x_ticks_rotation(self, rotation):
+        self.__x_ticks_rotation = rotation
 
     def add(self, x_values: List, y_values: List[float], label: Optional[str] = None):
         self.__graphs.append(PlotDots(x_values, y_values, label))
@@ -114,6 +118,9 @@ class Plot:
         if self.__gen_x_ticks_func:
             plt.xticks(ticks=self.__gen_x_ticks_func(all_x_values))
 
+        if self.__x_ticks_rotation:
+            plt.xticks(rotation=self.__x_ticks_rotation)
+
         # Add a legend
         if need_a_legend:
             plt.legend()
@@ -128,7 +135,7 @@ class Plot:
 
 def save_subplots(plots: List[Plot], path: str):
     num_subplots = len(plots)
-    plt.figure(figsize=(8, 5 * num_subplots))
+    plt.figure(figsize=(8, 7 * num_subplots))
     for i, plot in enumerate(plots):
         plot.set_as_sublot()
         plot.set_plot_size(None)

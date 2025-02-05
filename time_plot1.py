@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Iterator, Tuple
 import os
 
@@ -10,8 +11,14 @@ import csv
 from collections import namedtuple
 import numpy as np
 
-BenchCSVColumnNames = ('Time', "compilation_time", "topology", "framework", "precision", "device", "system_hardware")
+BenchCSVColumnNames = ('Time', "compilation_time", "measurement_date", "topology", "framework", "precision", "device", "system_hardware")
 BenchCSVItem = namedtuple('BenchCSVItem', BenchCSVColumnNames)
+
+
+def get_adjusted_date(dt: datetime) -> datetime.date:
+    if dt.time() < datetime.strptime("13:00", "%H:%M").time():
+        return (dt - timedelta(days=1)).date()
+    return dt.date()
 
 
 def parse_benchmark_input(path: str) -> Iterator[BenchCSVItem]:
@@ -21,6 +28,7 @@ def parse_benchmark_input(path: str) -> Iterator[BenchCSVItem]:
             yield BenchCSVItem(
                 row['Time'],
                 float(row['compilation_time']),
+                get_adjusted_date(datetime.strptime(row['Time'], '%Y-%m-%d %H:%M:%S')),
                 row['topology'],
                 row['framework'],
                 row['precision'],
@@ -198,6 +206,46 @@ def gen_plot_with_subplots(device: str,
     return plot
 
 
+def gen_plot_with_subplots_datetime(device: str,
+                           model_info: ModelInfo,
+                           values: Dict[datetime, Optional[float]],
+                           what: str):
+    title = ''
+    x_label = 'date'
+    y_label = f'seconds'
+
+    plot = Plot(title, x_label, y_label)
+    plot.set_x_ticks_rotation(90)
+
+    x_values_dt = sorted(values.keys())
+    y_values = [values[key] for key in x_values_dt]
+    x_values = [item.strftime('%Y-%m-%d') for item in x_values_dt]
+    plot.add(x_values, y_values)
+
+    # Calculate the median value of y_values
+    median_value = float(np.median(y_values))
+    plot.append_x_line(median_value, f'Median: {"%.2f" % median_value} seconds', 'red', '--')
+
+    # maximum deviation from median in %
+    max_deviation_abs = max((item for item in y_values), key=lambda e: abs(e - median_value))
+    max_deviation = abs(median_value - max_deviation_abs) * 100.0 / median_value
+
+    if max_deviation > 1.0:
+        # Calculate 10% deviation from the median
+        deviation = 0.01 * median_value
+        lower_bound = median_value - deviation
+        upper_bound = median_value + deviation
+        plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
+
+    title = f'{what} {device}\n{model_info.framework} {model_info.name} {model_info.precision}'
+    if model_info.config:
+        title += f' {model_info.config}'
+    title += f' max deviation {max_deviation :.2f}%'
+    plot.set_title(title)
+
+    return plot
+
+
 class PlotCompareCompileTimeWithBenchmarking:
     def get_compile_time_data(self, data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
         for model_info, model_data_items in full_join_by_model_info(data):
@@ -329,4 +377,89 @@ def plot_join_ts_and_benchmark(csv_data: List[Dict[ModelInfo, ModelData]], bench
         path += '_ts_and_benchmarks.png'
         save_subplots(plots, path)
 
-plot_join_ts_and_benchmark(csv_data, benchmark_items, 'CPU')
+#plot_join_ts_and_benchmark(csv_data, benchmark_items, 'CPU')
+
+def plot_join_ts_and_benchmark_datetime(csv_data: List[Dict[ModelInfo, ModelData]], benchmark_items: List[BenchCSVItem], device: str):
+    ts_stats_data_first_compile_time = {}
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        compile_times = {}
+        for model_data in model_data_items:
+            if model_data is None or len(model_data.get_compile_durations()) == 0:
+                continue
+            compile_times[model_data.get_measurement_date()] = model_data.get_compile_durations()[0] / 1_000_000_000
+
+        new_model_info = copy.deepcopy(model_info)
+        new_model_info = new_model_info._replace(config = '')
+        if new_model_info not in ts_stats_data_first_compile_time:
+            ts_stats_data_first_compile_time[new_model_info] = []
+        ts_stats_data_first_compile_time[new_model_info].append(compile_times)
+
+    ts_stats_data_median_compile_time = {}
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        compile_times = {}
+        for model_data in model_data_items:
+            if model_data is None or len(model_data.get_compile_durations()) == 0:
+                continue
+            compile_times[model_data.get_measurement_date()] = model_data.get_compile_time() / 1_000_000_000
+
+        new_model_info = copy.deepcopy(model_info)
+        new_model_info = new_model_info._replace(config = '')
+        if new_model_info not in ts_stats_data_median_compile_time:
+            ts_stats_data_median_compile_time[new_model_info] = []
+        ts_stats_data_median_compile_time[new_model_info].append(compile_times)
+
+    benchmark_items = [item for item in benchmark_items if item.device == device]
+    benchmark_data = {}
+    for model_info, model_data_list in join_benchmark_input_csv_items(benchmark_items):
+        benchmark_data[model_info] = model_data_list
+    get_benchmark_hardware_items = get_benchmark_hardware(benchmark_items)
+
+    for model_info in ts_stats_data_first_compile_time.keys():
+        plots = []
+        plot_values = {} # Dict[what, Dict[Date, float]]
+        if model_info not in benchmark_data:
+            continue
+
+        if len(ts_stats_data_first_compile_time[model_info]) == 1:
+            plot_values['transformation stats first compile time'] = ts_stats_data_first_compile_time[model_info][0]
+        else:
+            for i, compile_times in enumerate(ts_stats_data_first_compile_time[model_info]):
+                plot_values['transformation stats first compile time {}'.format(i)] = compile_times
+
+        if len(ts_stats_data_median_compile_time[model_info]) == 1:
+            plot_values['transformation stats median compile time'] = ts_stats_data_median_compile_time[model_info][0]
+        else:
+            for i, compile_times in enumerate(ts_stats_data_median_compile_time[model_info]):
+                plot_values['transformation stats median compile time {}'.format(i)] = compile_times
+
+        for hardware in get_benchmark_hardware_items:
+            values = {}
+            for item in benchmark_data[model_info]:
+                if item.system_hardware != hardware:
+                    continue
+                values[item.measurement_date] = item.compilation_time
+            plot_values['benchmark compile time {}'.format(hardware)] = values
+
+        common_dates = set()
+        for what, values in plot_values.items():
+            if not values:
+                continue
+            if not common_dates:
+                common_dates = set(values.keys())
+            common_dates &= set(values.keys())
+
+        for what, values in plot_values.items():
+            values = {date: val for date, val in values.items() if date in common_dates}
+            if not values:
+                continue
+            plot = gen_plot_with_subplots_datetime(device, model_info, values, what)
+            plots.append(plot)
+
+        if not plots:
+            continue
+
+        path = os.path.join('.', f'{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
+        path += '_ts_and_benchmarks.png'
+        save_subplots(plots, path)
+
+plot_join_ts_and_benchmark_datetime(csv_data, benchmark_items, 'CPU')
