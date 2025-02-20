@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from collections import namedtuple
 from typing import List, Tuple, Optional, Iterator, Dict, Any
 
@@ -373,7 +374,7 @@ class PlotOutput:
 def gen_plot_time_by_iterations(output_dir: str,
                                                      device: str, model_info: ModelInfo, model_data_items: Iterator[List[float]],
                                                      what: str, file_prefix: str):
-    title = f'{what}{device}\n{model_info.framework} {model_info.name} {model_info.precision}'
+    title = f'{what} {device}\n{model_info.framework} {model_info.name} {model_info.precision}'
     if model_info.config:
         title += f' {model_info.config}'
     x_label = 'iteration number'
@@ -470,4 +471,61 @@ def gen_CompareCompileTimeWithBenchmarking(output_dir: str,
         path += f'_{model_info.config}'
     path += f'_{file_prefix}'
     path += '.png'
+    plot.plot(path)
+
+
+def gen_plot_by_date(output_dir: str,
+                     device: str, model_info: ModelInfo, model_data_items: Dict[date, int],
+                     what: str, file_prefix: str, y_label: str):
+    title = f'{what} {device}\n{model_info.name} {model_info.precision}'
+    x_label = 'date'
+
+    plot = Plot(title, x_label, y_label)
+    plot.set_plot_size((12, 12))
+    plot.set_x_ticks_rotation(90)
+
+    x_values_objs = sorted(model_data_items.keys())
+    x_values = [item.strftime('%d %B') for item in x_values_objs]
+    y_values = [model_data_items[item] for item in x_values_objs]
+
+    plot.add(x_values, y_values)
+
+    # Calculate the median value of y_values
+    median_value = float(np.median(y_values))
+    plot.append_x_line(median_value, f'Median: {"%.2f" % median_value}', 'red', '--')
+
+    # maximum deviation from median in %
+    max_deviation_abs = max((item for item in y_values), key=lambda e: abs(e - median_value))
+    max_deviation = abs(median_value - max_deviation_abs) * 100.0 / median_value
+
+    if max_deviation > 1.0:
+        # Calculate 10% deviation from the median
+        deviation = 0.01 * median_value
+        lower_bound = median_value - deviation
+        upper_bound = median_value + deviation
+        plot.set_stripe(lower_bound, upper_bound, label='1% deviation from the median')
+
+    title = f'{what} {device}\n{model_info.name} {model_info.precision}\nmax deviation from median: {max_deviation:.2f}%'
+    plot.set_title(title)
+
+    path = os.path.join(output_dir, f'{device}_{model_info.framework}_{model_info.name}_{model_info.precision}')
+    if model_info.config:
+        path += f'_{model_info.config}'
+    path += f'_{file_prefix}'
+    path += '.png'
+    plot.plot(path)
+
+
+def gen_plot_key_value_float(output_dir: str,
+                             model_data_items: Dict[str, Dict[float, float]],
+                             title: str, file_prefix: str, x_label: str, y_label: str):
+    plot = Plot(title, x_label, y_label)
+    plot.set_plot_size((12, 8))
+
+    for label, model_data_d in model_data_items.items():
+        x_values = sorted(model_data_d.keys())
+        y_values = [model_data_d[item] for item in x_values]
+        plot.add(x_values, y_values, label)
+
+    path = os.path.join(output_dir, f'{file_prefix}.png')
     plot.plot(path)

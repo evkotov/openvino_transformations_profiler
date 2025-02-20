@@ -322,3 +322,9 @@ def get_debug_mem_rss_and_shared(csv_data: List[Dict[ModelInfo, ModelData]]) -> 
         data_dicts = (data.get_debug_units_with_type('mem_rss_and_shared_usage') for data in model_data_items
                      if data is not None)
         yield model_info, data_dicts
+
+
+def join_plain_manager_time_by_model(csv_data: List[Dict[ModelInfo, ModelData]]) -> Iterator[Tuple[ModelInfo, List[Optional[float]]]]:
+    for model_info, model_data_items in full_join_by_model_info(csv_data):
+        values = [model_data.get_manager_plain_sequence_median_sum() if model_data is not None else None for model_data in model_data_items]
+        yield model_info, values

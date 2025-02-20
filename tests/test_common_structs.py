@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock
 import numpy as np
 from ov_ts_profiler.common_structs import ComparisonValues, SummaryStats, CSVItem, Unit, \
-    make_model_console_description
+    make_model_console_description, calculate_median_error
 from ov_ts_profiler.common_structs import ModelInfo, ModelData, full_join_by_model_info
 
 
@@ -638,18 +638,6 @@ class TestModelData(unittest.TestCase):
         with self.assertRaises(AssertionError):
             model_data.get_manager_plain_sequence_median_gap_sum_by_iteration()
 
-    def test_get_mem_rss_with_valid_data(self):
-        model_data = ModelData()
-        unit_mock = MagicMock()
-        unit_mock.get_durations.return_value = [100]
-        model_data.get_units_with_type = MagicMock(return_value=iter([unit_mock]))
-        self.assertEqual(model_data.get_mem_rss(), 100)
-
-    def test_get_mem_rss_with_no_data(self):
-        model_data = ModelData()
-        model_data.get_units_with_type = MagicMock(return_value=iter([]))
-        self.assertEqual(model_data.get_mem_rss(), 0)
-
     def test_get_mem_virtual_with_valid_data(self):
         model_data = ModelData()
         unit_mock = MagicMock()
@@ -683,6 +671,387 @@ class TestMakeModelConsoleDescription(unittest.TestCase):
         model_info = ModelInfo('', '', '', '')
         result = make_model_console_description(model_info)
         self.assertEqual(result, '  ')
+
+
+class TestModelDataGetMemRss(unittest.TestCase):
+    def test_get_mem_rss_returns_correct_value(self):
+        csv_item = MagicMock()
+        csv_item.type = 'mem_rss'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        model_data = ModelData()
+        model_data.append(csv_item)
+        self.assertEqual(model_data.get_mem_rss(), 100.0)
+
+    def test_get_mem_rss_raises_index_error_when_no_items(self):
+        model_data = ModelData()
+        with self.assertRaises(IndexError):
+            model_data.get_mem_rss()
+
+
+class TestUnitGetDurationStddevNIterations(unittest.TestCase):
+    def test_get_duration_stddev_n_iterations_returns_correct_value(self):
+        csv_item = MagicMock()
+        csv_item.type = 'mem_rss'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        unit = Unit(csv_item)
+        unit.add(csv_item)
+        self.assertEqual(unit.get_duration_stddev_n_iterations(1), 0.0)
+
+    def test_get_duration_stddev_n_iterations_handles_empty_durations(self):
+        csv_item = MagicMock()
+        csv_item.type = 'mem_rss'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        unit = Unit(csv_item)
+        unit._Unit__durations = []
+        self.assertTrue(np.isnan(unit.get_duration_stddev_n_iterations(1)))
+
+    def test_get_duration_stddev_n_iterations_handles_multiple_durations(self):
+        csv_item = MagicMock()
+        csv_item.type = 'mem_rss'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        unit = Unit(csv_item)
+        unit.add(csv_item)
+        unit.add(csv_item)
+        self.assertAlmostEqual(unit.get_duration_stddev_n_iterations(2), 0.0)
+
+
+class TestUnit_get_duration_mad_n_iterations(unittest.TestCase):
+    def test_get_duration_mad_n_iterations_returns_correct_value(self):
+        csv_item = MagicMock()
+        csv_item.type = 'mem_rss'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        unit = Unit(csv_item)
+        unit.add(csv_item)
+        self.assertEqual(unit.get_duration_mad_n_iterations(1), 0.0)
+
+    def test_get_duration_mad_n_iterations_handles_empty_durations(self):
+        csv_item = MagicMock()
+        csv_item.type = 'mem_rss'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        unit = Unit(csv_item)
+        unit._Unit__durations = []
+        self.assertTrue(np.isnan(unit.get_duration_mad_n_iterations(1)))
+
+    def test_get_duration_mad_n_iterations_handles_multiple_durations(self):
+        csv_item = MagicMock()
+        csv_item.type = 'mem_rss'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        unit = Unit(csv_item)
+        unit.add(csv_item)
+        unit.add(csv_item)
+        self.assertAlmostEqual(unit.get_duration_mad_n_iterations(2), 0.0)
+
+
+class TestModelData_get_compile_time_stddev_n_iterations(unittest.TestCase):
+    def test_get_compile_time_stddev_n_iterations_returns_correct_value(self):
+        csv_item = MagicMock()
+        csv_item.type = 'compile_time'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        model_data = ModelData()
+        model_data.append(csv_item)
+        self.assertEqual(model_data.get_compile_time_stddev_n_iterations(1), 0.0)
+
+    def test_get_compile_time_stddev_n_iterations_handles_no_compile_time(self):
+        model_data = ModelData()
+        self.assertIsNone(model_data.get_compile_time_stddev_n_iterations(1))
+
+    def test_get_compile_time_stddev_n_iterations_handles_multiple_durations(self):
+        csv_item = MagicMock()
+        csv_item.type = 'compile_time'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        model_data = ModelData()
+        model_data.append(csv_item)
+        model_data.append(csv_item)
+        self.assertAlmostEqual(model_data.get_compile_time_stddev_n_iterations(2), 0.0)
+
+
+class TestModelData_get_compile_time_stddev_n_iterations(unittest.TestCase):
+    def test_get_compile_time_stddev_n_iterations_returns_correct_value(self):
+        csv_item = MagicMock()
+        csv_item.type = 'compile_time'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        model_data = ModelData()
+        model_data.append(csv_item)
+        self.assertEqual(model_data.get_compile_time_stddev_n_iterations(1), 0.0)
+
+    def test_get_compile_time_stddev_n_iterations_handles_no_compile_time(self):
+        model_data = ModelData()
+        self.assertIsNone(model_data.get_compile_time_stddev_n_iterations(1))
+
+    def test_get_compile_time_stddev_n_iterations_handles_multiple_durations(self):
+        csv_item = MagicMock()
+        csv_item.type = 'compile_time'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        model_data = ModelData()
+        model_data.append(csv_item)
+        model_data.append(csv_item)
+        self.assertAlmostEqual(model_data.get_compile_time_stddev_n_iterations(2), 0.0)
+
+
+class TestModelData_get_compile_time_mad_n_iterations(unittest.TestCase):
+    def test_get_compile_time_mad_n_iterations_returns_correct_value(self):
+        csv_item = MagicMock()
+        csv_item.type = 'compile_time'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        model_data = ModelData()
+        model_data.append(csv_item)
+        self.assertEqual(model_data.get_compile_time_mad_n_iterations(1), 0.0)
+
+    def test_get_compile_time_mad_n_iterations_handles_no_compile_time(self):
+        model_data = ModelData()
+        self.assertIsNone(model_data.get_compile_time_mad_n_iterations(1))
+
+    def test_get_compile_time_mad_n_iterations_handles_multiple_durations(self):
+        csv_item = MagicMock()
+        csv_item.type = 'compile_time'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        model_data = ModelData()
+        model_data.append(csv_item)
+        model_data.append(csv_item)
+        self.assertAlmostEqual(model_data.get_compile_time_mad_n_iterations(2), 0.0)
+
+
+class TestModelData_get_plain_manager_time_stddev_n_iterations(unittest.TestCase):
+    def test_get_plain_manager_time_stddev_n_iterations_returns_correct_value(self):
+        csv_item = MagicMock()
+        csv_item.type = 'manager_start'
+        csv_item.device = 'CPU'
+        csv_item.model_path = 'path'
+        csv_item.model_framework = 'framework'
+        csv_item.model_precision = 'precision'
+        csv_item.transformation_name = 'transformation'
+        csv_item.manager_name = 'manager'
+        csv_item.status = 'True'
+        csv_item.duration = '100.0'
+        model_data = ModelData()
+        model_data.append(csv_item)
+        csv_item.type = 'manager_end'
+        csv_item.duration = '200.0'
+        model_data.append(csv_item)
+        self.assertEqual(model_data.get_plain_manager_time_stddev_n_iterations(1), 0.0)
+
+    def test_get_plain_manager_time_stddev_n_iterations_handles_no_durations(self):
+        model_data = ModelData()
+        self.assertIsNone(model_data.get_plain_manager_time_stddev_n_iterations(1))
+
+    def test_get_plain_manager_time_stddev_n_iterations_handles_multiple_durations(self):
+        csv_item_start = MagicMock()
+        csv_item_start.type = 'manager_start'
+        csv_item_start.device = 'CPU'
+        csv_item_start.model_path = 'path'
+        csv_item_start.model_framework = 'framework'
+        csv_item_start.model_precision = 'precision'
+        csv_item_start.transformation_name = 'transformation'
+        csv_item_start.manager_name = 'manager'
+        csv_item_start.status = 'True'
+        csv_item_start.duration = '100.0'
+
+        csv_item_end = MagicMock()
+        csv_item_end.type = 'manager_end'
+        csv_item_end.device = 'CPU'
+        csv_item_end.model_path = 'path'
+        csv_item_end.model_framework = 'framework'
+        csv_item_end.model_precision = 'precision'
+        csv_item_end.transformation_name = 'transformation'
+        csv_item_end.manager_name = 'manager'
+        csv_item_end.status = 'True'
+        csv_item_end.duration = '200.0'
+
+        model_data = ModelData()
+        model_data.append(csv_item_start)
+        model_data.append(csv_item_end)
+        model_data.append(csv_item_start)
+        model_data.append(csv_item_end)
+
+        self.assertAlmostEqual(model_data.get_plain_manager_time_stddev_n_iterations(2), 0.0)
+
+
+class TestUnitget_plain_manager_time_mad_n_iterations(unittest.TestCase):
+    def test_get_plain_manager_time_mad_n_iterations_returns_correct_value(self):
+        csv_item_start = MagicMock()
+        csv_item_start.type = 'manager_start'
+        csv_item_start.device = 'CPU'
+        csv_item_start.model_path = 'path'
+        csv_item_start.model_framework = 'framework'
+        csv_item_start.model_precision = 'precision'
+        csv_item_start.transformation_name = 'transformation'
+        csv_item_start.manager_name = 'manager'
+        csv_item_start.status = 'True'
+        csv_item_start.duration = '100.0'
+
+        csv_item_end = MagicMock()
+        csv_item_end.type = 'manager_end'
+        csv_item_end.device = 'CPU'
+        csv_item_end.model_path = 'path'
+        csv_item_end.model_framework = 'framework'
+        csv_item_end.model_precision = 'precision'
+        csv_item_end.transformation_name = 'transformation'
+        csv_item_end.manager_name = 'manager'
+        csv_item_end.status = 'True'
+        csv_item_end.duration = '200.0'
+
+        model_data = ModelData()
+        model_data.append(csv_item_start)
+        model_data.append(csv_item_end)
+        self.assertEqual(model_data.get_plain_manager_time_mad_n_iterations(1), 0.0)
+
+    def test_get_plain_manager_time_mad_n_iterations_handles_no_durations(self):
+        model_data = ModelData()
+        self.assertIsNone(model_data.get_plain_manager_time_mad_n_iterations(1))
+
+    def test_get_plain_manager_time_mad_n_iterations_handles_multiple_durations(self):
+        csv_item_start = MagicMock()
+        csv_item_start.type = 'manager_start'
+        csv_item_start.device = 'CPU'
+        csv_item_start.model_path = 'path'
+        csv_item_start.model_framework = 'framework'
+        csv_item_start.model_precision = 'precision'
+        csv_item_start.transformation_name = 'transformation'
+        csv_item_start.manager_name = 'manager'
+        csv_item_start.status = 'True'
+        csv_item_start.duration = '100.0'
+
+        csv_item_end = MagicMock()
+        csv_item_end.type = 'manager_end'
+        csv_item_end.device = 'CPU'
+        csv_item_end.model_path = 'path'
+        csv_item_end.model_framework = 'framework'
+        csv_item_end.model_precision = 'precision'
+        csv_item_end.transformation_name = 'transformation'
+        csv_item_end.manager_name = 'manager'
+        csv_item_end.status = 'True'
+        csv_item_end.duration = '200.0'
+
+        model_data = ModelData()
+        model_data.append(csv_item_start)
+        model_data.append(csv_item_end)
+        model_data.append(csv_item_start)
+        model_data.append(csv_item_end)
+
+        self.assertAlmostEqual(model_data.get_plain_manager_time_mad_n_iterations(2), 0.0)
+
+
+class TestCalculateMedianError(unittest.TestCase):
+    def test_median_error_standard_data(self):
+        data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        result = calculate_median_error(data)
+        self.assertAlmostEqual(result, 4.05, delta=0.1)
+
+    def test_median_error_with_outliers(self):
+        data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 100]
+        result = calculate_median_error(data)
+        self.assertAlmostEqual(result, 3.6, delta=0.1)
+
+    def test_median_error_minimum_data(self):
+        data = [1, 2]
+        result = calculate_median_error(data)
+        self.assertAlmostEqual(result, 0.5, delta=0.1)
+
+    def test_median_error_not_enough_data(self):
+        data = [1]
+        with self.assertRaises(ValueError):
+            calculate_median_error(data)
+
+    def test_median_error_high_confidence(self):
+        data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        result = calculate_median_error(data, confidence=0.99)
+        self.assertAlmostEqual(result, 4.5, delta=0.1)
+
+    def test_median_error_low_confidence(self):
+        data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        result = calculate_median_error(data, confidence=0.5)
+        self.assertAlmostEqual(result, 2.25, delta=0.1)
 
 
 if __name__ == "__main__":

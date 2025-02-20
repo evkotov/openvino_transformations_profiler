@@ -58,6 +58,8 @@ def read_csv(path: str) -> Iterator[CSVItem]:
         has_device = 'device' in column_names
         has_status = 'status' in column_names
         for row in csv_reader:
+            if not row:
+                continue
             if not has_device:
                 row.insert(0, 'N/A')
             if not has_config:

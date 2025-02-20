@@ -6,6 +6,7 @@ from collections import namedtuple, deque
 from datetime import datetime, timezone, timedelta, date
 from itertools import tee
 from typing import Optional, List, Iterator, Dict, Tuple, Any
+from scipy.stats import norm
 
 import numpy as np
 
@@ -24,6 +25,9 @@ CSVColumnNames = ('device',
 
 
 CSVItem = namedtuple('CSVItem', CSVColumnNames)
+
+
+
 
 
 class Unit:
@@ -97,6 +101,17 @@ class Unit:
 
     def get_duration_stddev(self) -> float:
         return float(np.std(self.get_durations()))
+
+    def get_duration_stddev_n_iterations(self, n_iter: int) -> float:
+        return float(np.std(self.get_durations()[:n_iter]))
+
+    def get_duration_mad_n_iterations(self, n_iter: int) -> float:
+        durations = self.get_durations()[:n_iter]
+        median = np.median(durations)
+        return float(np.median(np.abs(durations - median)))
+
+    def get_median_confidence_interval_n_iterations(self, n_iter: int) -> MedianConfidenceInterval:
+        return calculate_median_confidence_interval(self.get_durations()[:n_iter])
 
     def get_variations_as_ratio(self) -> List[float]:
         if self.__deviations is None or Unit.USE_NO_CACHE:
@@ -215,11 +230,7 @@ class ModelData:
         return self.get_debug_units(lambda item: item.get_status()['type'] == type_name)
 
     def get_mem_rss(self) -> int:
-        try:
-            item = next(self.get_units_with_type('mem_rss'))
-            return int(item.get_durations()[0])
-        except StopIteration:
-            return 0
+        return float(self.mem_rss_items[0].get_durations()[0])
 
     def get_mem_virtual(self) -> int:
         try:
@@ -351,6 +362,53 @@ class ModelData:
         except StopIteration:
             return None
 
+    def get_compile_time_by_iteration(self) -> Optional[List[float]]:
+        try:
+            item = next(self.get_units_with_type('compile_time'))
+            return item.get_durations()
+        except StopIteration:
+            return None
+
+    def get_compile_time_stddev_n_iterations(self, n_iter: int) -> Optional[float]:
+        try:
+            item = next(self.get_units_with_type('compile_time'))
+            return item.get_duration_stddev_n_iterations(n_iter)
+        except StopIteration:
+            return None
+
+    def get_compile_time_mad_n_iterations(self, n_iter: int) -> Optional[float]:
+        try:
+            item = next(self.get_units_with_type('compile_time'))
+            return item.get_duration_mad_n_iterations(n_iter)
+        except StopIteration:
+            return None
+
+    def get_plain_manager_time_stddev_n_iterations(self, n_iter: int) -> Optional[float]:
+        durations = self.get_manager_plain_sequence_sum_by_iteration()
+        if not durations:
+            return None
+        return float(np.std(durations[:n_iter]))
+
+    def get_plain_manager_time_stddev_error_n_iterations(self, n_iter: int) -> Optional[float]:
+        durations = self.get_manager_plain_sequence_sum_by_iteration()
+        if not durations:
+            return None
+        return float(np.std(durations[:n_iter]))
+
+    def get_plain_manager_time_mad_n_iterations(self, n_iter: int) -> Optional[float]:
+        durations = self.get_manager_plain_sequence_sum_by_iteration()
+        if not durations:
+            return None
+        durations = durations[:n_iter]
+        median = np.median(durations)
+        return float(np.median(np.abs(durations - median)))
+
+    def get_plain_time_median_confidence_interval_n_iterations(self, n_iter: int) -> Optional[MedianConfidenceInterval]:
+        durations = self.get_manager_plain_sequence_sum_by_iteration()
+        if not durations:
+            return None
+        return calculate_median_error(durations[:n_iter])
+
     def sum_transformation_time(self) -> float:
         units = self.get_units_with_type('transformation')
         return sum(unit.get_duration_median() for unit in units)
@@ -476,7 +534,8 @@ def get_measurement_date(data: Dict[ModelInfo, ModelData]) -> Optional[datetime]
     if not dates:
         return None
     first_date = dates[0]
-    assert all(date == first_date for date in dates), "Not all dates are the same"
+    if not all(date == first_date for date in dates):
+        print("Not all dates are the same")
     return first_date
 
 

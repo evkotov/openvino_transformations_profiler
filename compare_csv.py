@@ -6,11 +6,13 @@ from dataclasses import dataclass, field
 import sys
 from typing import List, Dict, Optional
 
+import numpy as np
+
 from ov_ts_profiler.output_utils import print_summary_stats, make_model_file_name, NoOutput, CSVOutput, ConsoleTableOutput
 from ov_ts_profiler.parse_input import get_csv_data, get_input_csv_files
 from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description, full_join_by_model_info
 from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations, PlotOutputRatioSimple, gen_plot_debug_items, \
-    gen_CompareCompileTimeWithBenchmarking
+    gen_CompareCompileTimeWithBenchmarking, gen_plot_by_date, Hist, ScatterPlot, gen_plot_key_value_float
 from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, filter_common_models, get_device, \
     get_all_models, \
     compile_time_by_iterations, get_sum_units_durations_by_iteration, get_compile_time_data, \
@@ -475,7 +477,7 @@ class PlotCompileTimeByIteration(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         device = get_device(csv_data)
         for model_info, durations in compile_time_by_iterations(csv_data):
-            gen_plot_time_by_iterations('.', device, model_info, durations, 'Compile time', 'compile_time')
+            gen_plot_time_by_iterations('.', device, model_info, durations, 'Compile time', 'compile_time_by_iteration')
 
 
 class PlotSumTSTimeByIteration(DataProcessor):
@@ -495,7 +497,7 @@ class PlotPlainManagerTimeByIteration(DataProcessor):
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
         device = get_device(csv_data)
         for model_info, durations in get_plain_manager_time_by_iteration(csv_data):
-            gen_plot_time_by_iterations('.', device, model_info, durations, 'Plain manager time', 'plain_manager_time')
+            gen_plot_time_by_iterations('.', device, model_info, durations, 'Plain manager time', 'plain_manager_time_by_iteration')
 
 
 class PlotPlainManagerGapTimeByIteration(DataProcessor):
@@ -582,6 +584,486 @@ class PlotCompareCompileTimeWithBenchmarking(DataProcessor):
         for model_info, model_data_iter in self.get_compile_time_data(csv_data):
             model_data_list = list(model_data_iter)
             gen_CompareCompileTimeWithBenchmarking('.', device, model_info, [model_data_list], 'compilation', 'compilation')
+
+
+
+class PlotMemRSS(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, model_data_items in full_join_by_model_info(csv_data):
+            values = {}
+            for model_data in model_data_items:
+                if model_data is None:
+                    continue
+                values[model_data.get_measurement_date()] = model_data.get_mem_rss() / (1024 * 1024)
+            gen_plot_by_date('.', device, model_info, values, 'memory consumption RSS', 'mem_rss', 'Mb')
+
+
+class PlotPlainManagerTimeByDate(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, model_data_items in full_join_by_model_info(csv_data):
+            values = {}
+            for model_data in model_data_items:
+                if model_data is None:
+                    continue
+                values[model_data.get_measurement_date()] = model_data.get_manager_plain_sequence_median_sum() / 1_000_000_000
+            gen_plot_by_date('.', device, model_info, values, 'plain manager time', 'plain_time', 'sec')
+
+
+class PlotCompileTimeByDate(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        for model_info, model_data_items in full_join_by_model_info(csv_data):
+            values = {}
+            for model_data in model_data_items:
+                if model_data is None:
+                    continue
+                values[model_data.get_measurement_date()] = model_data.get_compile_time() / 1_000_000_000
+            gen_plot_by_date('.', device, model_info, values, 'compile time', 'compile_time', 'sec')
+
+
+class PlotVariationByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        model_data_items = [model_data for csv_data_d in csv_data for model_data in csv_data_d.values()]
+        for i in range(1, 10):
+            print(f'iteration {i}')
+            compile_times = [model_data.get_compile_time() / 1_000_000_000 for model_data in model_data_items
+                             if model_data is not None and len(model_data.get_compile_durations()) >= i]
+            assert all(compile_time is not None and not np.isnan(compile_time) and compile_time >= 0 for compile_time in compile_times)
+
+            stddev_values = [100.0 * model_data.get_compile_time_stddev_n_iterations(i) / model_data.get_compile_time() for model_data in model_data_items
+                             if model_data is not None and len(model_data.get_compile_durations()) >= i]
+
+            assert all(stddev_value is not None and not np.isnan(stddev_value) and stddev_value >= 0 for stddev_value in stddev_values)
+            hist = Hist(f"compile time std deviation for {i} iterations", "std deviation / compile time, %", "number of values")
+            hist.set_values(stddev_values)
+            hist.plot(f'stddev_{i}_iter.png')
+
+            scatter = ScatterPlot(f"scatter std deviation for {i} iterations", "std deviation / compile time, %", "compile time, sec")
+            scatter.set_values(stddev_values, compile_times)
+            scatter.plot(f'scatter_stddev_{i}_iter.png')
+
+            mad_values = [100.0 * model_data.get_compile_time_mad_n_iterations(i) / model_data.get_compile_time() for model_data in model_data_items
+                          if model_data is not None and len(model_data.get_compile_durations()) >= i]
+            assert all(mad_value is not None and not np.isnan(mad_value) and mad_value >= 0 for mad_value in mad_values)
+            hist = Hist(f"compile time MAD for {i} iterations", "MAD / compile time, %", "number of values")
+            hist.set_values(mad_values)
+            hist.plot(f'mad_{i}_iter.png')
+
+            scatter = ScatterPlot(f"scatter MAD for {i} iterations", "MAD / compile time, %", "compile time, sec")
+            scatter.set_values(mad_values, compile_times)
+            scatter.plot(f'scatter_mad_{i}_iter.png')
+
+
+class PlotPlainSeqErrorByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        class Occurrence:
+            def __init__(self):
+                self.n_total = 0
+                self.n_out_of_90_percentile = 0
+                self.n_out_of_90_percentile_percent = None
+                self.n_out_of_99_percentile = 0
+                self.n_out_of_99_percentile_percent = None
+                self.median10 = []
+                self.median10_max = None
+                self.median10_median = None
+                self.median10_median_90_percentile = None
+
+            def calculate(self):
+                self.median10_max = np.max(self.median10)
+                self.median10_median = np.median(self.median10)
+                self.median10_median_90_percentile = np.percentile(self.median10, 90)
+                self.n_out_of_90_percentile_percent = 100.0 * self.n_out_of_90_percentile / self.n_total
+                self.n_out_of_99_percentile_percent = 100.0 * self.n_out_of_99_percentile / self.n_total
+
+        device = get_device(csv_data)
+        plain_time_items = []
+        for csv_data_d in csv_data:
+            for model_info, model_data in csv_data_d.items():
+                data_list = model_data.get_manager_plain_sequence_sum_by_iteration()
+                plain_time_items.append((model_info, data_list))
+        median_values = {}
+        max_values = {}
+        mean_values = {}
+        p90_values = {}
+        p99_values = {}
+        occurrence = {}
+        for i in range(3, 11):
+            print(f'iteration {i}')
+            deltas = []
+            for model_info, plain_time_list in plain_time_items:
+                if plain_time_list is None:
+                    continue
+                if len(plain_time_list) < i:
+                    continue
+                median_i = np.median(plain_time_list[:i])
+                median_10 = np.median(plain_time_list)
+                assert not np.isnan(median_10)
+                assert median_10 != 0.0
+                deltas.append(100.0 * abs(median_10 - median_i) / median_10)
+            median_values[i] = np.median(deltas)
+            max_values[i] = np.max(deltas)
+            mean_values[i] = np.mean(deltas)
+            p90_values[i] = np.percentile(deltas, 90)
+            p99_values[i] = np.percentile(deltas, 99)
+
+            for model_info, plain_time_list in plain_time_items:
+                if model_info not in occurrence:
+                    occurrence[model_info] = Occurrence()
+                occurrence[model_info].n_total += 1
+                median_i = np.median(plain_time_list[:i])
+                median_10 = np.median(plain_time_list)
+                assert not np.isnan(median_10)
+                assert median_10 != 0.0
+                delta = 100.0 * abs(median_10 - median_i) / median_10
+                if delta > p90_values[i]:
+                    occurrence[model_info].n_out_of_90_percentile += 1
+                if delta > p99_values[i]:
+                    occurrence[model_info].n_out_of_99_percentile += 1
+                occurrence[model_info].median10.append(median_10)
+
+        gen_plot_key_value_float('.',
+                                 {'median': median_values, 'maximum': max_values, 'mean': mean_values,
+                                  'percentile 90': p90_values,
+                                  'percentile 99': p99_values},
+                                 'plain manager time error by iteration number',
+                                 f'{device}_plain_seq_error_by_iteration', 'number of iterations', '(median[10] - median[:i])/median[10], %')
+
+        for model_info, occ in occurrence.items():
+            occ.calculate()
+        occurrence_items = [(model_info, occ) for model_info, occ in occurrence.items()]
+        sorted_by_90_percentile = sorted(occurrence_items, key=lambda x: x[1].n_out_of_90_percentile_percent, reverse=True)
+        table = []
+        for model_info, occ in sorted_by_90_percentile:
+            if occ.n_out_of_90_percentile == 0:
+                continue
+            row = {'framework': model_info.framework,
+                   'name': model_info.name,
+                   'precision': model_info.precision,
+                   'config': model_info.config}
+            row['total'] = occ.n_total
+            row['out of 90 percentile'] = occ.n_out_of_90_percentile
+            row['out of 90 percentile, %'] = f'{occ.n_out_of_90_percentile_percent:.2f}%'
+            row['median10_max'] = occ.median10_max
+            row['median10_median'] = occ.median10_median
+            row['median10_median_90_percentile'] = occ.median10_median_90_percentile
+            table.append(row)
+        header_90_p = ['framework', 'name', 'precision', 'config', 'total', 'out of 90 percentile', 'out of 90 percentile, %',
+                       'median10_max', 'median10_median', 'median10_median_90_percentile']
+        with CSVOutput(f'{device}_plain_seq_error_by_iteration_out_of_90_percentile.csv', header_90_p, None) as csv_file:
+            csv_file.write(table)
+        sorted_by_99_percentile = sorted(occurrence_items, key=lambda x: x[1].n_out_of_99_percentile_percent, reverse=True)
+        table = []
+        for model_info, occ in sorted_by_99_percentile:
+            if occ.n_out_of_99_percentile == 0:
+                continue
+            row = {'framework': model_info.framework,
+                   'name': model_info.name,
+                   'precision': model_info.precision,
+                   'config': model_info.config}
+            row['total'] = occ.n_total
+            row['out of 99 percentile'] = occ.n_out_of_99_percentile
+            row['out of 99 percentile, %'] = f'{occ.n_out_of_99_percentile_percent:.2f}%'
+            row['median10_max'] = occ.median10_max
+            row['median10_median'] = occ.median10_median
+            row['median10_median_90_percentile'] = occ.median10_median_90_percentile
+            table.append(row)
+        header_99_p = ['framework', 'name', 'precision', 'config', 'total', 'out of 99 percentile', 'out of 99 percentile, %',
+                       'median10_max', 'median10_median', 'median10_median_90_percentile']
+        with CSVOutput(f'{device}_plain_seq_error_by_iteration_out_of_99_percentile.csv', header_99_p, None) as csv_file:
+            csv_file.write(table)
+
+
+class PlotCompileTimeErrorByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+        model_data_items = [model_data for csv_data_d in csv_data for model_data in csv_data_d.values()]
+        plain_times = [model_data.get_compile_time_by_iteration() if model_data is not None else None for model_data in model_data_items]
+        median_values = {}
+        max_values = {}
+        mean_values = {}
+        p90_values = {}
+        p99_values = {}
+        for i in range(3, 11):
+            print(f'iteration {i}')
+            deltas = []
+            for plain_time_list in plain_times:
+                if plain_time_list is None:
+                    continue
+                if len(plain_time_list) < i:
+                    continue
+                median_i = np.median(plain_time_list[:i])
+                median_10 = np.median(plain_time_list)
+                assert not np.isnan(median_10)
+                assert median_10 != 0.0
+                deltas.append(100.0 * abs(median_10 - median_i) / median_10)
+            median_values[i] = np.median(deltas)
+            max_values[i] = np.max(deltas)
+            mean_values[i] = np.mean(deltas)
+            p90_values[i] = np.percentile(deltas, 90)
+            p99_values[i] = np.percentile(deltas, 99)
+        gen_plot_key_value_float('.',
+                                 {'median': median_values, 'maximum': max_values, 'mean': mean_values,
+                                  'percentile 90': p90_values,
+                                  'percentile 99': p99_values},
+                                 f'{device} compile time error by iteration number',
+                                 f'{device}_compile_time_error_by_iteration', 'number of iterations', '(median[10] - median[:i])/median[10], %')
+
+
+class PlotCompare2InputsPlainSeqErrorByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        class Occurrence:
+            def __init__(self):
+                self.medians = []
+                self.deltas = {}
+                self.n_total = 0
+                self.median_median = None
+                self.n_out_of_90_percentile = 0
+                self.n_out_of_90_percentile_percent = None
+                self.n_out_of_99_percentile = 0
+                self.n_out_of_99_percentile_percent = None
+
+            def calculate(self):
+                self.n_out_of_90_percentile_percent = 100.0 * self.n_out_of_90_percentile / self.n_total
+                self.n_out_of_99_percentile_percent = 100.0 * self.n_out_of_99_percentile / self.n_total
+                self.median_median = float(np.median(self.medians))
+
+        def get_model_data_median(data: Optional[ModelData], i: int) -> Optional[float]:
+            if data is None:
+                return None
+            seqs = data.get_manager_plain_sequence_sum_by_iteration()
+            if len(seqs) < i:
+                return None
+            median = np.median(seqs[:i])
+            assert not np.isnan(median)
+            assert median != 0.0
+            return float(median)
+
+        device = get_device(csv_data)
+
+        median_values = {}
+        max_values = {}
+        mean_values = {}
+        p90_values = {}
+        p99_values = {}
+        occurrence = {}
+        for i in range(1, 11):
+            print(f'iteration {i}')
+            deltas = []
+            for model_info, model_data_items in full_join_by_model_info(csv_data):
+                if model_info not in occurrence:
+                    occurrence[model_info] = Occurrence()
+                assert len(model_data_items) == 2
+                median_i_0 = get_model_data_median(model_data_items[0], i)
+                median_i_1 = get_model_data_median(model_data_items[1], i)
+                if median_i_0 is None or median_i_1 is None:
+                    occurrence[model_info].deltas[i] = None
+                    continue
+                delta = 100.0 * abs(median_i_0 - median_i_1) / max(median_i_0, median_i_1)
+                deltas.append(delta)
+                occurrence[model_info].deltas[i] = delta
+                occurrence[model_info].medians.append(max(median_i_0, median_i_1))
+            median_values[i] = np.median(deltas)
+            max_values[i] = np.max(deltas)
+            mean_values[i] = np.mean(deltas)
+            p90_values[i] = np.percentile(deltas, 90)
+            p99_values[i] = np.percentile(deltas, 99)
+
+            for model_info, occ in occurrence.items():
+                occ.n_total += 1
+                if occ.deltas[i] is not None and occ.deltas[i] > p90_values[i]:
+                    occ.n_out_of_90_percentile += 1
+                if occ.deltas[i] is not None and occ.deltas[i] > p99_values[i]:
+                    occ.n_out_of_99_percentile += 1
+
+        gen_plot_key_value_float('.',
+                                 {'median': median_values, 'maximum': max_values, 'mean': mean_values,
+                                  'percentile 90': p90_values,
+                                  'percentile 99': p99_values},
+                                 f'{device} plain manager time error by iteration number',
+                                 f'{device}_plain_seq_error_by_iteration_2inputs', 'number of iterations', 'delta median / median, %')
+
+        for model_info, occ in occurrence.items():
+            occ.calculate()
+        occurrence_items = [(model_info, occ) for model_info, occ in occurrence.items()]
+        sorted_by_90_percentile = sorted(occurrence_items, key=lambda x: x[1].n_out_of_90_percentile_percent, reverse=True)
+        table = []
+        for model_info, occ in sorted_by_90_percentile:
+            if occ.n_out_of_90_percentile == 0:
+                continue
+            row = {'framework': model_info.framework,
+                   'name': model_info.name,
+                   'precision': model_info.precision,
+                   'config': model_info.config}
+            row['total'] = occ.n_total
+            row['out of 90 percentile'] = occ.n_out_of_90_percentile
+            row['out of 90 percentile, %'] = f'{occ.n_out_of_90_percentile_percent:.2f}%'
+            row['median plain time'] = occ.median_median
+            table.append(row)
+        header_90_p = ['framework', 'name', 'precision', 'config', 'total', 'out of 90 percentile', 'out of 90 percentile, %',
+                       'median plain time']
+        with CSVOutput(f'{device}_plain_seq_error_by_iteration_out_of_90_percentile.csv', header_90_p, None) as csv_file:
+            csv_file.write(table)
+
+        sorted_by_99_percentile = sorted(occurrence_items, key=lambda x: x[1].n_out_of_99_percentile_percent, reverse=True)
+        table = []
+        for model_info, occ in sorted_by_99_percentile:
+            if occ.n_out_of_99_percentile == 0:
+                continue
+            row = {'framework': model_info.framework,
+                   'name': model_info.name,
+                   'precision': model_info.precision,
+                   'config': model_info.config}
+            row['total'] = occ.n_total
+            row['out of 99 percentile'] = occ.n_out_of_99_percentile
+            row['out of 99 percentile, %'] = f'{occ.n_out_of_99_percentile_percent:.2f}%'
+            row['median plain time'] = occ.median_median
+            table.append(row)
+        header_99_p = ['framework', 'name', 'precision', 'config', 'total', 'out of 99 percentile', 'out of 99 percentile, %',
+                       'median plain time']
+        with CSVOutput(f'{device}_plain_seq_error_by_iteration_out_of_99_percentile.csv', header_99_p, None) as csv_file:
+            csv_file.write(table)
+
+
+class PlotCompare2InputsCompileTimeByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        class Occurrence:
+            def __init__(self):
+                self.medians = []
+                self.deltas = {}
+                self.n_total = 0
+                self.median_median = None
+                self.n_out_of_90_percentile = 0
+                self.n_out_of_90_percentile_percent = None
+                self.n_out_of_99_percentile = 0
+                self.n_out_of_99_percentile_percent = None
+
+            def calculate(self):
+                self.n_out_of_90_percentile_percent = 100.0 * self.n_out_of_90_percentile / self.n_total
+                self.n_out_of_99_percentile_percent = 100.0 * self.n_out_of_99_percentile / self.n_total
+                self.median_median = float(np.median(self.medians))
+
+        def get_model_data_median(data: Optional[ModelData], i: int) -> Optional[float]:
+            if data is None:
+                return None
+            seqs = data.get_compile_time_by_iteration()
+            if len(seqs) < i:
+                return None
+            median = np.median(seqs[:i])
+            assert not np.isnan(median)
+            assert median != 0.0
+            return float(median)
+
+        device = get_device(csv_data)
+
+        median_values = {}
+        max_values = {}
+        mean_values = {}
+        p90_values = {}
+        p99_values = {}
+        occurrence = {}
+        for i in range(1, 11):
+            print(f'iteration {i}')
+            deltas = []
+            for model_info, model_data_items in full_join_by_model_info(csv_data):
+                if model_info not in occurrence:
+                    occurrence[model_info] = Occurrence()
+                assert len(model_data_items) == 2
+                median_i_0 = get_model_data_median(model_data_items[0], i)
+                median_i_1 = get_model_data_median(model_data_items[1], i)
+                if median_i_0 is None or median_i_1 is None:
+                    occurrence[model_info].deltas[i] = None
+                    continue
+                delta = 100.0 * abs(median_i_0 - median_i_1) / max(median_i_0, median_i_1)
+                deltas.append(delta)
+                occurrence[model_info].deltas[i] = delta
+                occurrence[model_info].medians.append(max(median_i_0, median_i_1))
+            median_values[i] = np.median(deltas)
+            max_values[i] = np.max(deltas)
+            mean_values[i] = np.mean(deltas)
+            p90_values[i] = np.percentile(deltas, 90)
+            p99_values[i] = np.percentile(deltas, 99)
+
+            for model_info, occ in occurrence.items():
+                occ.n_total += 1
+                if occ.deltas[i] is not None and occ.deltas[i] > p90_values[i]:
+                    occ.n_out_of_90_percentile += 1
+                if occ.deltas[i] is not None and occ.deltas[i] > p99_values[i]:
+                    occ.n_out_of_99_percentile += 1
+
+        gen_plot_key_value_float('.',
+                                 {'median': median_values, 'maximum': max_values, 'mean': mean_values,
+                                  'percentile 90': p90_values,
+                                  'percentile 99': p99_values},
+                                 f'{device} compile time error by iteration number',
+                                 f'{device}_compile_time_error_by_iteration_2inputs', 'number of iterations', 'delta median / median, %')
+
+        for model_info, occ in occurrence.items():
+            occ.calculate()
+        occurrence_items = [(model_info, occ) for model_info, occ in occurrence.items()]
+        sorted_by_90_percentile = sorted(occurrence_items, key=lambda x: x[1].n_out_of_90_percentile_percent, reverse=True)
+        table = []
+        for model_info, occ in sorted_by_90_percentile:
+            if occ.n_out_of_90_percentile == 0:
+                continue
+            row = {'framework': model_info.framework,
+                   'name': model_info.name,
+                   'precision': model_info.precision,
+                   'config': model_info.config}
+            row['total'] = occ.n_total
+            row['out of 90 percentile'] = occ.n_out_of_90_percentile
+            row['out of 90 percentile, %'] = f'{occ.n_out_of_90_percentile_percent:.2f}%'
+            row['median compile time'] = occ.median_median
+            table.append(row)
+        header_90_p = ['framework', 'name', 'precision', 'config', 'total', 'out of 90 percentile', 'out of 90 percentile, %',
+                       'median compile time']
+        with CSVOutput(f'{device}_compile_time_error_by_iteration_out_of_90_percentile.csv', header_90_p, None) as csv_file:
+            csv_file.write(table)
+
+        sorted_by_99_percentile = sorted(occurrence_items, key=lambda x: x[1].n_out_of_99_percentile_percent, reverse=True)
+        table = []
+        for model_info, occ in sorted_by_99_percentile:
+            if occ.n_out_of_99_percentile == 0:
+                continue
+            row = {'framework': model_info.framework,
+                   'name': model_info.name,
+                   'precision': model_info.precision,
+                   'config': model_info.config}
+            row['total'] = occ.n_total
+            row['out of 99 percentile'] = occ.n_out_of_99_percentile
+            row['out of 99 percentile, %'] = f'{occ.n_out_of_99_percentile_percent:.2f}%'
+            row['median compile time'] = occ.median_median
+            table.append(row)
+        header_99_p = ['framework', 'name', 'precision', 'config', 'total', 'out of 99 percentile', 'out of 99 percentile, %',
+                       'median compile time']
+        with CSVOutput(f'{device}_compile_time_error_by_iteration_out_of_99_percentile.csv', header_99_p, None) as csv_file:
+            csv_file.write(table)
 
 
 @dataclass
@@ -1143,7 +1625,26 @@ def build_data_processors(config):
     #data_processors.append(PlotMemRSSDebug())
     #data_processors.append(PlotVMpeakDebug())
     #data_processors.append(PlotMemRSSAndSharedDebug())
-    data_processors.append(PlotCompareCompileTimeWithBenchmarking())
+    #data_processors.append(PlotCompareCompileTimeWithBenchmarking())
+
+    #processor = PlotMemRSS()
+    #data_processors.append(processor)
+
+    #data_processors.append(PlotPlainSeqErrorByIteration())
+    #data_processors.append(PlotCompileTimeErrorByIteration())
+
+    #processor_plain_time_by_date = PlotPlainManagerTimeByDate()
+    #data_processors.append(processor_plain_time_by_date)
+
+    #processor_compile_time_by_date = PlotCompileTimeByDate()
+    #data_processors.append(processor_compile_time_by_date)
+
+    #data_processors.append(PlotCompileTimeByIteration())
+    #data_processors.append(PlotPlainManagerTimeByIteration())
+
+    #data_processors.append(PlotCompare2InputsPlainSeqErrorByIteration())
+    data_processors.append(PlotCompare2InputsCompileTimeByIteration())
+    #data_processors.append(PlotPlainManagerTimeByIteration())
 
     return data_processors
 
