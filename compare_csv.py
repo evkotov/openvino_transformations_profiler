@@ -1066,6 +1066,68 @@ class PlotCompare2InputsCompileTimeByIteration(DataProcessor):
             csv_file.write(table)
 
 
+class PlotCompare2InputsPlainSeqErrorByTime(DataProcessor):
+    def __init__(self, step_sec: float):
+        super().__init__(None)
+        self.step_sec = step_sec
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+
+        def get_model_data_median(data: Optional[ModelData], i: int) -> Optional[float]:
+            if data is None:
+                return None
+            seqs = data.get_manager_plain_sequence_sum_by_iteration()
+            if len(seqs) < i:
+                return None
+            median = np.median(seqs[:i])
+            assert not np.isnan(median)
+            assert median != 0.0
+            return float(median)
+
+        deltas = {}
+        for i in range(1, 11):
+            print(f'iteration {i}')
+            for model_info, model_data_items in full_join_by_model_info(csv_data):
+                assert len(model_data_items) == 2
+                median_i_0 = get_model_data_median(model_data_items[0], i)
+                median_i_1 = get_model_data_median(model_data_items[1], i)
+                if median_i_0 is None or median_i_1 is None:
+                    continue
+                delta = 100.0 * abs(median_i_0 - median_i_1) / max(median_i_0, median_i_1)
+                plain_seq_duration0 = model_data_items[0].get_manager_plain_sequence_first_n_iter_duration(i)
+                plain_seq_duration1 = model_data_items[1].get_manager_plain_sequence_first_n_iter_duration(i)
+                if plain_seq_duration0 is None or plain_seq_duration1 is None:
+                    continue
+                mean_duration = float(np.mean([plain_seq_duration0, plain_seq_duration1])) / 1_000_000_000
+                deltas[mean_duration] = delta
+
+        median_values = {}
+        max_values = {}
+        mean_values = {}
+        p90_values = {}
+        p99_values = {}
+
+        max_duration = max(deltas.keys())
+        for duration in np.arange(self.step_sec, max_duration, self.step_sec):
+            duration = float(duration)
+            deltas_for_duration = [delta for mean_duration, delta in deltas.items() if
+                                   duration > mean_duration >= duration - self.step_sec]
+            assert len(deltas_for_duration) > 0
+            median_values[duration] = float(np.median(deltas_for_duration))
+            max_values[duration] = float(np.max(deltas_for_duration))
+            mean_values[duration] = float(np.mean(deltas_for_duration))
+            p90_values[duration] = float(np.percentile(deltas_for_duration, 90))
+            p99_values[duration] = float(np.percentile(deltas_for_duration, 99))
+
+        device = get_device(csv_data)
+        gen_plot_key_value_float('.',
+                                 {'median': median_values, 'maximum': max_values, 'mean': mean_values,
+                                  'percentile 90': p90_values,
+                                  'percentile 99': p99_values},
+                                 f'{device} plain manager time error by time',
+                                 f'{device}_plain_seq_error_by_time_2inputs', 'time, s', 'delta median / median, %')
+
+
 @dataclass
 class Config:
     compare_compile_time = None
@@ -1641,10 +1703,11 @@ def build_data_processors(config):
 
     #data_processors.append(PlotCompileTimeByIteration())
     #data_processors.append(PlotPlainManagerTimeByIteration())
+    #data_processors.append(PlotPlainManagerTimeByIteration())
 
     #data_processors.append(PlotCompare2InputsPlainSeqErrorByIteration())
-    data_processors.append(PlotCompare2InputsCompileTimeByIteration())
-    #data_processors.append(PlotPlainManagerTimeByIteration())
+    #data_processors.append(PlotCompare2InputsCompileTimeByIteration())
+    #data_processors.append(PlotCompare2InputsPlainSeqErrorByTime(10.0))
 
     return data_processors
 

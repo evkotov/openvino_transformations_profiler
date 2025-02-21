@@ -175,6 +175,7 @@ class ModelData:
         self.__manager_plain_sequence_sum_by_iteration: Optional[List[float]] = None
         self.__manager_plain_sequence_median_gap_sum_by_iteration: Optional[List[float]] = None
         self.__manager_plain_sequence_median_gap_sum: Optional[float] = None
+        self.__manager_plain_sequence_duration: Optional[float] = None
         self.__measurement_time = None
         self.__measurement_date = None
 
@@ -265,6 +266,44 @@ class ModelData:
 
     def get_manager_plain_sequence_names(self) -> List[str]:
         return [start.name for start, end in self.get_manager_plain_sequence()]
+
+    def get_manager_plain_sequence_duration(self) -> float:
+        if self.__manager_plain_sequence_duration is None:
+            self.__manager_plain_sequence_duration = self.__make_manager_plain_sequence_duration()
+        return self.__manager_plain_sequence_duration
+
+    def __make_manager_plain_sequence_duration(self) -> float:
+        manager_plain_seq = self.get_manager_plain_sequence()
+        if not manager_plain_seq:
+            return 0.0
+        n_durations = manager_plain_seq[0][0].get_n_durations()
+        durations = []
+        for i in range(n_durations):
+            first_start = manager_plain_seq[0][0].get_durations()[i]
+            last_end = manager_plain_seq[-1][1].get_durations()[i]
+            assert not np.isnan(first_start)
+            assert not np.isnan(last_end)
+            assert first_start is not None
+            assert last_end is not None
+            durations.append(last_end - first_start)
+        return float(np.median(durations))
+
+    def get_manager_plain_sequence_first_n_iter_duration(self, i: int) -> float:
+        manager_plain_seq = self.get_manager_plain_sequence()
+        if not manager_plain_seq:
+            return 0.0
+        n_durations = manager_plain_seq[0][0].get_n_durations()
+        if n_durations <= i:
+            return 0.0
+
+        first_start = manager_plain_seq[0][0].get_durations()[0]
+        last_end = manager_plain_seq[-1][1].get_durations()[i]
+        assert not np.isnan(first_start)
+        assert not np.isnan(last_end)
+        assert first_start is not None
+        assert last_end is not None
+        return float(last_end - first_start)
+
 
     def __make_manager_plain_sequence_median_sum(self) -> float:
         sums = self.get_manager_plain_sequence_sum_by_iteration()
