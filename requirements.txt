@@ -2,3 +2,4 @@ tabulate
 numpy
 matplotlib
 openpyxl
+scipy

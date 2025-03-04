@@ -1128,6 +1128,124 @@ class PlotCompare2InputsPlainSeqErrorByTime(DataProcessor):
                                  f'{device}_plain_seq_error_by_time_2inputs', 'time, s', 'delta median / median, %')
 
 
+class PlotCompareMultipleInputsPlainSeqErrorByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+        self.__only_medians = False
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        def get_model_data_median(data: Optional[ModelData], i: int) -> Optional[float]:
+            if data is None:
+                return None
+            seqs = data.get_manager_plain_sequence_sum_by_iteration()
+            if len(seqs) < i:
+                return None
+            median = np.median(seqs[:i])
+            assert not np.isnan(median)
+            assert median != 0.0
+            return float(median)
+
+        device = get_device(csv_data)
+        n_inputs = len(csv_data)
+
+        median_values = {}
+        max_values = {}
+        p95_values = {}
+        for i in range(1, 11):
+            print(f'iteration {i}')
+            deltas = {}
+            for model_info, model_data_items in full_join_by_model_info(csv_data):
+                assert n_inputs == len(model_data_items)
+                median_i_0 = get_model_data_median(model_data_items[0], i)
+                if median_i_0 is None:
+                    continue
+                for j in range(1, len(model_data_items)):
+                    median_i_j = get_model_data_median(model_data_items[j], i)
+                    if median_i_j is None:
+                        continue
+                    delta = 100.0 * abs(median_i_0 - median_i_j) / max(median_i_0, median_i_j)
+                    if j not in deltas:
+                        deltas[j] = []
+                    deltas[j].append(delta)
+            for j in range(1, n_inputs):
+                if j not in median_values:
+                    median_values[j] = {}
+                    max_values[j] = {}
+                    p95_values[j] = {}
+                median_values[j][i] = np.median(deltas[j])
+                max_values[j][i] = np.max(deltas[j])
+                p95_values[j][i] = np.percentile(deltas[j], 95)
+
+        plot_data = {}
+        for j in range(1, n_inputs):
+            plot_data[f'median #{j}'] = median_values[j]
+            if not self.__only_medians:
+                plot_data[f'max #{j}'] = max_values[j]
+                plot_data[f'p95 #{j}'] = p95_values[j]
+        gen_plot_key_value_float('.',
+                                 plot_data,
+                                 f'{device} transformations time error',
+                                 f'{device}_plain_seq_error_by_iteration_3inputs', 'number of iterations', '%')
+
+
+class PlotCompareMultipleInputsCompileTimeErrorByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        def get_model_data_median(data: Optional[ModelData], i: int) -> Optional[float]:
+            if data is None:
+                return None
+            seqs = data.get_compile_time_by_iteration()
+            if len(seqs) < i:
+                return None
+            median = np.median(seqs[:i])
+            assert not np.isnan(median)
+            assert median != 0.0
+            return float(median)
+
+        device = get_device(csv_data)
+        n_inputs = len(csv_data)
+
+        median_values = {}
+        max_values = {}
+        p95_values = {}
+        for i in range(1, 11):
+            print(f'iteration {i}')
+            deltas = {}
+            for model_info, model_data_items in full_join_by_model_info(csv_data):
+                assert n_inputs == len(model_data_items)
+                median_i_0 = get_model_data_median(model_data_items[0], i)
+                if median_i_0 is None:
+                    continue
+                for j in range(1, len(model_data_items)):
+                    median_i_j = get_model_data_median(model_data_items[j], i)
+                    if median_i_j is None:
+                        continue
+                    delta = 100.0 * abs(median_i_0 - median_i_j) / max(median_i_0, median_i_j)
+                    if j not in deltas:
+                        deltas[j] = []
+                    deltas[j].append(delta)
+            for j in range(1, n_inputs):
+                if j not in median_values:
+                    median_values[j] = {}
+                    max_values[j] = {}
+                    p95_values[j] = {}
+                median_values[j][i] = np.median(deltas[j])
+                max_values[j][i] = np.max(deltas[j])
+                p95_values[j][i] = np.percentile(deltas[j], 95)
+
+        plot_data = {}
+        for j in range(1, n_inputs):
+            plot_data[f'median #{j}'] = median_values[j]
+            #plot_data[f'max #{j}'] = max_values[j]
+            #plot_data[f'p95 #{j}'] = p95_values[j]
+        gen_plot_key_value_float('.',
+                                 plot_data,
+                                 f'{device} compile time error',
+                                 f'{device}_compile_time_error_by_iteration_3inputs', 'number of iterations', '%')
+
+
 @dataclass
 class Config:
     compare_compile_time = None
@@ -1708,6 +1826,9 @@ def build_data_processors(config):
     #data_processors.append(PlotCompare2InputsPlainSeqErrorByIteration())
     #data_processors.append(PlotCompare2InputsCompileTimeByIteration())
     #data_processors.append(PlotCompare2InputsPlainSeqErrorByTime(10.0))
+
+    data_processors.append(PlotCompareMultipleInputsPlainSeqErrorByIteration())
+    #data_processors.append(PlotCompareMultipleInputsCompileTimeErrorByIteration())
 
     return data_processors
 
