@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import argparse
+from collections import namedtuple
 from dataclasses import dataclass, field
 import sys
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Iterator
 
 import numpy as np
 
 from ov_ts_profiler.output_utils import print_summary_stats, make_model_file_name, NoOutput, CSVOutput, ConsoleTableOutput
 from ov_ts_profiler.parse_input import get_csv_data, get_input_csv_files
-from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description, full_join_by_model_info
+from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description, full_join_by_model_info, \
+    Unit
 from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations, PlotOutputRatioSimple, gen_plot_debug_items, \
     gen_CompareCompileTimeWithBenchmarking, gen_plot_by_date, Hist, ScatterPlot, gen_plot_key_value_float
 from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, filter_common_models, get_device, \
@@ -1325,6 +1327,227 @@ class PlotCompareMultipleInputsCompileTimeErrorByIteration(DataProcessor):
                                  f'{device}_compile_time_error_by_iteration_3inputs', 'number of iterations', '%')
 
 
+class PlotCompareMultipleInputsTransformationErrorByIteration(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+        self.__only_medians = False
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+
+        TransformationInfo = namedtuple('TransformationInfo', ['model_info', 'name', 'manager_name'])
+
+        class Occurrence:
+            def __init__(self):
+                self.n_total = 0
+                self.n_out_of_95_percentile = 0
+                self.n_out_of_95_percentile_percent = None
+                self.n_in_5_percentile = 0
+                self.n_in_5_percentile_percent = None
+
+            def calculate(self):
+                self.n_out_of_95_percentile_percent = 100.0 * self.n_out_of_95_percentile / self.n_total
+                self.n_in_5_percentile_percent = 100.0 * self.n_in_5_percentile / self.n_total
+
+        def get_transformations(data: Optional[ModelData]) -> Dict[Tuple[str, str], Unit]:
+            if data is None:
+                return {}
+            d = {}
+            for unit in data.get_units_with_type('transformation'):
+                d[(unit.name, unit.manager_name)] = unit
+            return d
+
+        def full_join_by_transformation_name(data1: Optional[ModelData], data2: Optional[ModelData])  -> Iterator[Tuple[str, str, List[Optional[Unit]]]]:
+            transformations1 = get_transformations(data1)
+            transformations2 = get_transformations(data2)
+            for (name, manager_name) in set(transformations1.keys()) | set(transformations2.keys()):
+                yield name, manager_name, [transformations1.get((name, manager_name)), transformations2.get((name, manager_name))]
+
+        def get_longest_transformations(data: Optional[ModelData], i: int) -> List[Unit]:
+            if data is None:
+                return []
+            units = list(data.get_units_with_type('transformation'))
+            units = sorted(units, key=lambda x: x.get_duration_median(), reverse=True)
+            return units[:i]
+
+        def get_unit_median(unit: Unit, i: int) -> Optional[float]:
+            if unit is None:
+                return None
+            durations = unit.get_durations()
+            if durations is None:
+                return None
+            if len(durations) < i:
+                return None
+            median = np.median(durations[:i])
+            assert not np.isnan(median)
+            assert median != 0.0
+            return float(median)
+
+        device = get_device(csv_data)
+        n_inputs = len(csv_data)
+        joined_models = list(full_join_by_model_info(csv_data))
+
+        median_values = {}
+        max_values = {}
+        p95_values = {}
+        p5_values = {}
+
+        ts_occurence: Dict[TransformationInfo, Occurrence] = {}
+
+        for k in range(1, 11):
+            print(f'iteration {k}')
+            for i in range(0, n_inputs):
+                for j in range(i + 1, n_inputs):
+                    ts_deltas: Dict[TransformationInfo, float] = {}
+                    deltas = []
+                    for model_info, model_data_items in joined_models:
+                        assert n_inputs == len(model_data_items)
+                        longest_transformations = {(unit.name, unit.manager_name) for unit in get_longest_transformations(model_data_items[i], 10)}
+                        for name, manager_name, units in full_join_by_transformation_name(model_data_items[i], model_data_items[j]):
+                            if units[0] is None or units[1] is None:
+                                continue
+                            if (units[0].name, units[0].manager_name) not in longest_transformations:
+                                continue
+                            median_i = get_unit_median(units[0], k)
+                            median_j = get_unit_median(units[1], k)
+                            if median_i is None or median_j is None:
+                                continue
+                            delta = 100.0 * abs(median_i - median_j) / max(median_i, median_j)
+                            deltas.append(delta)
+                            ts_deltas[TransformationInfo(model_info, name, manager_name)] = delta
+
+                    delta_median = np.median(deltas)
+                    delta_max = np.max(deltas)
+                    delta_p95 = np.percentile(deltas, 95)
+                    delta_p5 = np.percentile(deltas, 5)
+
+                    if i not in median_values:
+                        median_values[i] = {}
+                        max_values[i] = {}
+                        p95_values[i] = {}
+                        p5_values[i] = {}
+                    if j not in median_values[i]:
+                        median_values[i][j] = {}
+                        max_values[i][j] = {}
+                        p95_values[i][j] = {}
+                        p5_values[i][j] = {}
+
+                    median_values[i][j][k] = delta_median
+                    max_values[i][j][k] = delta_max
+                    p95_values[i][j][k] = delta_p95
+                    p5_values[i][j][k] = delta_p5
+
+                    for ts_info, delta in ts_deltas.items():
+                        if ts_info not in ts_occurence:
+                            ts_occurence[ts_info] = Occurrence()
+                        ts_occurence[ts_info].n_total += 1
+                        if delta > delta_p95:
+                            ts_occurence[ts_info].n_out_of_95_percentile += 1
+                        if delta < delta_p5:
+                            ts_occurence[ts_info].n_in_5_percentile += 1
+
+        plot_data = {}
+        for i in range(0, n_inputs):
+            for j in range(i + 1, n_inputs):
+                plot_data[f'median #{i} - #{j}'] = median_values[i][j]
+                if not self.__only_medians:
+                    plot_data[f'max #{i} - #{j}'] = max_values[i][j]
+                    plot_data[f'p95 #{i} - #{j}'] = p95_values[i][j]
+        gen_plot_key_value_float('.',
+                                 plot_data,
+                                 f'{device} transformations time error',
+                                 f'{device}_ts_error_by_iteration_multi_inputs', 'number of iterations', '%')
+
+        for model_info, occ in ts_occurence.items():
+            occ.calculate()
+
+        in_p5_ts = [ts_info for ts_info, occ in ts_occurence.items() if occ.n_in_5_percentile > 0]
+        in_p5_ts = sorted(in_p5_ts, key=lambda x: ts_occurence[x].n_in_5_percentile_percent, reverse=True)
+
+        table = []
+        for ts_info in in_p5_ts:
+            occ = ts_occurence[ts_info]
+            row = {'name': ts_info.name,
+                   'manager name': ts_info.manager_name,
+                   'framework': ts_info.model_info.framework,
+                   'model name': ts_info.model_info.name,
+                   'precision': ts_info.model_info.precision,
+                   'config': ts_info.model_info.config}
+            row['total'] = occ.n_total
+            row['in 5 percentile'] = occ.n_in_5_percentile
+            row['in 5 percentile, %'] = f'{occ.n_in_5_percentile_percent:.2f}%'
+            table.append(row)
+        header = ['name', 'manager name', 'framework', 'model name', 'precision', 'config', 'total', 'in 5 percentile', 'in 5 percentile, %']
+        with CSVOutput(f'{device}_compile_time_error_by_iteration_in_5_percentile.csv', header, None) as csv_file:
+            csv_file.write(table)
+
+        out_of_p95_ts = [ts_info for ts_info, occ in ts_occurence.items() if occ.n_out_of_95_percentile > 0]
+        out_of_p95_ts = sorted(out_of_p95_ts, key=lambda x: ts_occurence[x].n_out_of_95_percentile_percent, reverse=True)
+
+        table = []
+        for ts_info in out_of_p95_ts:
+            occ = ts_occurence[ts_info]
+            row = {'name': ts_info.name,
+                   'manager name': ts_info.manager_name,
+                   'framework': ts_info.model_info.framework,
+                   'model name': ts_info.model_info.name,
+                   'precision': ts_info.model_info.precision,
+                   'config': ts_info.model_info.config}
+            row['total'] = occ.n_total
+            row['out of 95 percentile'] = occ.n_out_of_95_percentile
+            row['out of 95 percentile, %'] = f'{occ.n_out_of_95_percentile_percent:.2f}%'
+            table.append(row)
+        header = ['name', 'manager name', 'framework', 'model name', 'precision', 'config', 'total', 'out of 95 percentile', 'out of 95 percentile, %']
+        with CSVOutput(f'{device}_ts_error_by_iteration_out_if_95_percentile.csv', header, None) as csv_file:
+            csv_file.write(table)
+
+'''
+class PlotTransformationByIteration(DataProcessor):
+    def __init__(self, model_info: ModelInfo, ts_name: str, manager_name: str):
+        super().__init__(None)
+        self.model_info = model_info
+        self.ts_name = ts_name
+        self.manager_name = manager_name
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+
+        def get_transformations(data: Optional[ModelData]) -> Dict[Tuple[str, str], Unit]:
+            if data is None:
+                return {}
+            d = {}
+            for unit in data.get_units_with_type('transformation'):
+                d[(unit.name, unit.manager_name)] = unit
+            return d
+
+        def get_transformation_time(data: Optional[ModelData], ts_name: str, manager_name: str) -> Optional[List[float]]:
+            units = get_transformations(data)
+            if (ts_name, manager_name) not in units:
+                return None
+            return units[(ts_name, manager_name)].get_durations()
+
+        device = get_device(csv_data)
+        n_inputs = len(csv_data)
+        joined_models = list(full_join_by_model_info(csv_data))
+
+        plot_values = {}
+
+        for k in range(1, 11):
+            for i in range(0, n_inputs):
+                for model_info, model_data_items in joined_models:
+                    if model_info != self.model_info:
+                        continue
+                    assert n_inputs == len(model_data_items)
+                    plot_values[i][k] = get_transformation_time(model_data_items[i], self.ts_name, self.manager_name)[k]
+
+        plot_data = {}
+        for i in range(0, n_inputs):
+            plot_data[f'#{i}'] = plot_values[i]
+        gen_plot_key_value_float('.',
+                                 plot_data,
+                                 f'{device} transformations time {self.model_info} {self.ts_name} {self.manager_name}',
+                                 f'{device}_{self.ts_name}_{self.manager_name}_ts_by_iteration_multi_inputs', 'number of iterations', '%')
+'''
+
+
 @dataclass
 class Config:
     compare_compile_time = None
@@ -1906,8 +2129,16 @@ def build_data_processors(config):
     #data_processors.append(PlotCompare2InputsCompileTimeByIteration())
     #data_processors.append(PlotCompare2InputsPlainSeqErrorByTime(10.0))
 
-    data_processors.append(PlotCompareMultipleInputsPlainSeqErrorByIteration())
+    #data_processors.append(PlotCompareMultipleInputsPlainSeqErrorByIteration())
     #data_processors.append(PlotCompareMultipleInputsCompileTimeErrorByIteration())
+
+    data_processors.append(PlotCompareMultipleInputsTransformationErrorByIteration())
+    '''
+    model_info = ModelInfo('PT', 'llama-3-8b-instruct', 'INT8-CW', 'OV_FP16-INT8_ASYM')
+    ts_name = 'ov::pass::RoPEFusion'
+    manager_name = 'CPU:PostLPT'
+    data_processors.append(PlotTransformationByIteration(model_info, ts_name, manager_name))
+    '''
 
     return data_processors
 
