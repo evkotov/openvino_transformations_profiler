@@ -1134,6 +1134,18 @@ class PlotCompareMultipleInputsPlainSeqErrorByIteration(DataProcessor):
         self.__only_medians = False
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        class Occurrence:
+            def __init__(self):
+                self.n_total = 0
+                self.n_out_of_95_percentile = 0
+                self.n_out_of_95_percentile_percent = None
+                self.n_in_5_percentile = 0
+                self.n_in_5_percentile_percent = None
+
+            def calculate(self):
+                self.n_out_of_95_percentile_percent = 100.0 * self.n_out_of_95_percentile / self.n_total
+                self.n_in_5_percentile_percent = 100.0 * self.n_in_5_percentile / self.n_total
+
         def get_model_data_median(data: Optional[ModelData], i: int) -> Optional[float]:
             if data is None:
                 return None
@@ -1147,45 +1159,112 @@ class PlotCompareMultipleInputsPlainSeqErrorByIteration(DataProcessor):
 
         device = get_device(csv_data)
         n_inputs = len(csv_data)
+        joined_models = list(full_join_by_model_info(csv_data))
 
         median_values = {}
         max_values = {}
         p95_values = {}
-        for i in range(1, 11):
-            print(f'iteration {i}')
-            deltas = {}
-            for model_info, model_data_items in full_join_by_model_info(csv_data):
-                assert n_inputs == len(model_data_items)
-                median_i_0 = get_model_data_median(model_data_items[0], i)
-                if median_i_0 is None:
-                    continue
-                for j in range(1, len(model_data_items)):
-                    median_i_j = get_model_data_median(model_data_items[j], i)
-                    if median_i_j is None:
-                        continue
-                    delta = 100.0 * abs(median_i_0 - median_i_j) / max(median_i_0, median_i_j)
-                    if j not in deltas:
-                        deltas[j] = []
-                    deltas[j].append(delta)
-            for j in range(1, n_inputs):
-                if j not in median_values:
-                    median_values[j] = {}
-                    max_values[j] = {}
-                    p95_values[j] = {}
-                median_values[j][i] = np.median(deltas[j])
-                max_values[j][i] = np.max(deltas[j])
-                p95_values[j][i] = np.percentile(deltas[j], 95)
+        p5_values = {}
+
+        model_occurence = {}
+
+        for k in range(1, 11):
+            print(f'iteration {k}')
+            for i in range(0, n_inputs):
+                for j in range(i + 1, n_inputs):
+                    model_deltas = {}
+                    deltas = []
+                    for model_info, model_data_items in joined_models:
+                        assert n_inputs == len(model_data_items)
+
+                        median_i = get_model_data_median(model_data_items[i], k)
+                        median_j = get_model_data_median(model_data_items[j], k)
+                        if median_i is None or median_j is None:
+                            continue
+                        delta = 100.0 * abs(median_i - median_j) / max(median_i, median_j)
+                        deltas.append(delta)
+                        model_deltas[model_info] = delta
+
+                    delta_median = np.median(deltas)
+                    delta_max = np.max(deltas)
+                    delta_p95 = np.percentile(deltas, 95)
+                    delta_p5 = np.percentile(deltas, 5)
+
+                    if i not in median_values:
+                        median_values[i] = {}
+                        max_values[i] = {}
+                        p95_values[i] = {}
+                        p5_values[i] = {}
+                    if j not in median_values[i]:
+                        median_values[i][j] = {}
+                        max_values[i][j] = {}
+                        p95_values[i][j] = {}
+                        p5_values[i][j] = {}
+
+                    median_values[i][j][k] = delta_median
+                    max_values[i][j][k] = delta_max
+                    p95_values[i][j][k] = delta_p95
+                    p5_values[i][j][k] = delta_p5
+
+                    for model_info, delta in model_deltas.items():
+                        if model_info not in model_occurence:
+                            model_occurence[model_info] = Occurrence()
+                        model_occurence[model_info].n_total += 1
+                        if delta > delta_p95:
+                            model_occurence[model_info].n_out_of_95_percentile += 1
+                        if delta < delta_p5:
+                            model_occurence[model_info].n_in_5_percentile += 1
 
         plot_data = {}
-        for j in range(1, n_inputs):
-            plot_data[f'median #{j}'] = median_values[j]
-            if not self.__only_medians:
-                plot_data[f'max #{j}'] = max_values[j]
-                plot_data[f'p95 #{j}'] = p95_values[j]
+        for i in range(0, n_inputs):
+            for j in range(i + 1, n_inputs):
+                plot_data[f'median #{i} - #{j}'] = median_values[i][j]
+                if not self.__only_medians:
+                    plot_data[f'max #{i} - #{j}'] = max_values[i][j]
+                    plot_data[f'p95 #{i} - #{j}'] = p95_values[i][j]
         gen_plot_key_value_float('.',
                                  plot_data,
                                  f'{device} transformations time error',
-                                 f'{device}_plain_seq_error_by_iteration_3inputs', 'number of iterations', '%')
+                                 f'{device}_plain_seq_error_by_iteration_multi_inputs', 'number of iterations', '%')
+
+        for model_info, occ in model_occurence.items():
+            occ.calculate()
+
+        in_p5_models = [model_info for model_info, occ in model_occurence.items() if occ.n_in_5_percentile > 0]
+        in_p5_models = sorted(in_p5_models, key=lambda x: model_occurence[x].n_in_5_percentile_percent, reverse=True)
+
+        table = []
+        for model_info in in_p5_models:
+            occ = model_occurence[model_info]
+            row = {'framework': model_info.framework,
+                   'name': model_info.name,
+                   'precision': model_info.precision,
+                   'config': model_info.config}
+            row['total'] = occ.n_total
+            row['in 5 percentile'] = occ.n_in_5_percentile
+            row['in 5 percentile, %'] = f'{occ.n_in_5_percentile_percent:.2f}%'
+            table.append(row)
+        header = ['framework', 'name', 'precision', 'config', 'total', 'in 5 percentile', 'in 5 percentile, %']
+        with CSVOutput(f'{device}_compile_time_error_by_iteration_in_5_percentile.csv', header, None) as csv_file:
+            csv_file.write(table)
+
+        out_of_p95_models = [model_info for model_info, occ in model_occurence.items() if occ.n_out_of_95_percentile > 0]
+        out_of_p95_models = sorted(out_of_p95_models, key=lambda x: model_occurence[x].n_out_of_95_percentile_percent, reverse=True)
+
+        table = []
+        for model_info in out_of_p95_models:
+            occ = model_occurence[model_info]
+            row = {'framework': model_info.framework,
+                   'name': model_info.name,
+                   'precision': model_info.precision,
+                   'config': model_info.config}
+            row['total'] = occ.n_total
+            row['out of 95 percentile'] = occ.n_out_of_95_percentile
+            row['out of 95 percentile, %'] = f'{occ.n_out_of_95_percentile_percent:.2f}%'
+            table.append(row)
+        header = ['framework', 'name', 'precision', 'config', 'total', 'out of 95 percentile', 'out of 95 percentile, %']
+        with CSVOutput(f'{device}_compile_time_error_by_iteration_out_if_95_percentile.csv', header, None) as csv_file:
+            csv_file.write(table)
 
 
 class PlotCompareMultipleInputsCompileTimeErrorByIteration(DataProcessor):

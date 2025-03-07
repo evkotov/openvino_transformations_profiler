@@ -520,7 +520,7 @@ def gen_plot_key_value_float(output_dir: str,
                              model_data_items: Dict[str, Dict[float, float]],
                              title: str, file_prefix: str, x_label: str, y_label: str):
     plot = Plot(title, x_label, y_label)
-    plot.set_plot_size((12, 8))
+    plot.set_plot_size((20, 15))
 
     for label, model_data_d in model_data_items.items():
         x_values = sorted(model_data_d.keys())
