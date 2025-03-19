@@ -195,6 +195,8 @@ def compare_sum_units(data: Dict[str, List[Optional[Total]]], n_csv_files: int):
     table = []
 
     for name, totals in data.items():
+        assert len(totals) == n_csv_files, f'Expected {n_csv_files} csv files, but got {len(totals)}'
+
         row = {'name' : name}
 
         for csv_idx in range(n_csv_files):

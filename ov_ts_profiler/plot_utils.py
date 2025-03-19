@@ -529,3 +529,32 @@ def gen_plot_key_value_float(output_dir: str,
 
     path = os.path.join(output_dir, f'{file_prefix}.png')
     plot.plot(path)
+
+
+def gen_plot_scatter_colors(output_dir: str,
+                            X: List[float],
+                            Y: List[float],
+                            values: List[float],
+                            title: str,
+                            file_prefix: str,
+                            x_label: str,
+                            y_label: str):
+
+    plt.figure(figsize=(30, 20))
+    plt.rcParams.update({'font.size': 22})
+    plt.pcolormesh(X, Y, values)
+    # Добавление цветовой шкалы
+    cbar = plt.colorbar()
+    cbar.set_label('Metric value')
+
+    plt.xticks(np.arange(1, np.max(X) + 1, 1))
+
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.title(title)
+
+
+
+    path = os.path.join(output_dir, f'{file_prefix}.png')
+    plt.savefig(path)
+    plt.close()

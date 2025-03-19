@@ -12,9 +12,10 @@ import numpy as np
 from ov_ts_profiler.output_utils import print_summary_stats, make_model_file_name, NoOutput, CSVOutput, ConsoleTableOutput
 from ov_ts_profiler.parse_input import get_csv_data, get_input_csv_files
 from ov_ts_profiler.common_structs import ModelData, ModelInfo, ComparisonValues, make_model_console_description, full_join_by_model_info, \
-    Unit
+    Unit, get_measurement_date
 from ov_ts_profiler.plot_utils import PlotOutput, gen_plot_time_by_iterations, PlotOutputRatioSimple, gen_plot_debug_items, \
-    gen_CompareCompileTimeWithBenchmarking, gen_plot_by_date, Hist, ScatterPlot, gen_plot_key_value_float
+    gen_CompareCompileTimeWithBenchmarking, gen_plot_by_date, Hist, ScatterPlot, gen_plot_key_value_float, \
+    gen_plot_scatter_colors
 from ov_ts_profiler.stat_utils import filter_by_models, filter_by_model_name, filter_common_models, get_device, \
     get_all_models, \
     compile_time_by_iterations, get_sum_units_durations_by_iteration, get_compile_time_data, \
@@ -1319,8 +1320,8 @@ class PlotCompareMultipleInputsCompileTimeErrorByIteration(DataProcessor):
         plot_data = {}
         for j in range(1, n_inputs):
             plot_data[f'median #{j}'] = median_values[j]
-            #plot_data[f'max #{j}'] = max_values[j]
-            #plot_data[f'p95 #{j}'] = p95_values[j]
+            plot_data[f'max #{j}'] = max_values[j]
+            plot_data[f'p95 #{j}'] = p95_values[j]
         gen_plot_key_value_float('.',
                                  plot_data,
                                  f'{device} compile time error',
@@ -1454,7 +1455,7 @@ class PlotCompareMultipleInputsTransformationErrorByIteration(DataProcessor):
                     plot_data[f'p95 #{i} - #{j}'] = p95_values[i][j]
         gen_plot_key_value_float('.',
                                  plot_data,
-                                 f'{device} transformations time error',
+                                 f'{device} separate longest transformations time error',
                                  f'{device}_ts_error_by_iteration_multi_inputs', 'number of iterations', '%')
 
         for model_info, occ in ts_occurence.items():
@@ -1546,6 +1547,123 @@ class PlotTransformationByIteration(DataProcessor):
                                  f'{device} transformations time {self.model_info} {self.ts_name} {self.manager_name}',
                                  f'{device}_{self.ts_name}_{self.manager_name}_ts_by_iteration_multi_inputs', 'number of iterations', '%')
 '''
+
+def process_deltas(data: Dict[ModelInfo, Dict[int, float]]):
+    model_deltas = []
+    for model_info in data:
+        model_data = data[model_info]
+        delta = model_data[18] - model_data[17]
+        model_deltas.append((model_info, delta))
+    sorted_model_deltas = sorted(model_deltas, key=lambda x: x[1], reverse=True)
+    for i, (model_info, delta) in enumerate(sorted_model_deltas):
+        print(f'{model_info}: {delta}')
+
+
+class PlotPlainSeqScatterColors(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        def normalize(data: Dict[ModelInfo, Dict[int, float]]) -> Dict[ModelInfo, Dict[int, float]]:
+            main_median = np.median([np.median(list(plain_times[model_info].values())) for model_info in data.keys()])
+            for model_info in data:
+                times = [x for x in data[model_info].values()]
+                median = np.median(times)
+                for i in data[model_info].keys():
+                    data[model_info][i] = (data[model_info][i] - median) + main_median
+            return data
+
+        def get_common_models(csv_data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]:
+            model_infos = [set(d.keys()) for d in csv_data]
+            common_models = model_infos[0]
+            for model_info in model_infos:
+                common_models &= model_info
+            return list(common_models)
+
+        common_models = get_common_models(csv_data)
+        plain_times = {}
+        for i in range(len(csv_data)):
+            csv_data_d = csv_data[i]
+            for model_info in common_models:
+                model_data = csv_data_d[model_info]
+                if model_info not in plain_times:
+                    plain_times[model_info] = {}
+                plain_times[model_info][i] = model_data.get_manager_plain_sequence_median_sum() / 1_000_000_000
+
+        process_deltas(plain_times)
+
+        plain_times = normalize(plain_times)
+
+        N = len(csv_data)
+        M = len(common_models)
+        x = np.arange(N + 1)
+        y = np.arange(M + 1)
+
+        X, Y = np.meshgrid(x, y)
+        values = np.full((len(common_models), len(csv_data)), np.nan)
+        for i, model_info in enumerate(common_models):
+            for index, value in plain_times[model_info].items():
+                values[i, index] = value
+
+        device = get_device(csv_data)
+        gen_plot_scatter_colors('.', X, Y, values, f'{device} sum transformations',
+                                f'{device}_sum_ts',
+                                'nightly job', 'model')
+
+
+
+
+
+class PlotCompileTimeScatterColors(DataProcessor):
+    def __init__(self):
+        super().__init__(None)
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        def normalize(data: Dict[ModelInfo, Dict[int, float]]) -> Dict[ModelInfo, Dict[int, float]]:
+            main_median = np.median([np.median(list(plain_times[model_info].values())) for model_info in data.keys()])
+            for model_info in data:
+                times = [x for x in data[model_info].values()]
+                median = np.median(times)
+                for i in data[model_info].keys():
+                    data[model_info][i] = (data[model_info][i] - median) + main_median
+            return data
+
+        def get_common_models(csv_data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]:
+            model_infos = [set(d.keys()) for d in csv_data]
+            common_models = model_infos[0]
+            for model_info in model_infos:
+                common_models &= model_info
+            return list(common_models)
+
+        common_models = get_common_models(csv_data)
+        plain_times = {}
+        for i in range(len(csv_data)):
+            csv_data_d = csv_data[i]
+            for model_info in common_models:
+                model_data = csv_data_d[model_info]
+                if model_info not in plain_times:
+                    plain_times[model_info] = {}
+                plain_times[model_info][i] = model_data.get_compile_time() / 1_000_000_000
+
+
+
+        plain_times = normalize(plain_times)
+
+        N = len(csv_data)
+        M = len(common_models)
+        x = np.arange(N + 1)
+        y = np.arange(M + 1)
+
+        X, Y = np.meshgrid(x, y)
+        values = np.full((len(common_models), len(csv_data)), np.nan)
+        for i, model_info in enumerate(common_models):
+            for index, value in plain_times[model_info].items():
+                values[i, index] = value
+
+        device = get_device(csv_data)
+        gen_plot_scatter_colors('.', X, Y, values, f'{device} compile time',
+                                f'{device}_compile_time',
+                                'nightly job', 'model')
 
 
 @dataclass
@@ -2104,41 +2222,8 @@ def build_data_processors(config):
                                                       'compare memory virtual')
         data_processors.append(CompareMemVirtual(output_factory))
 
-    #data_processors.append(PlotMemRSSDebug())
-    #data_processors.append(PlotVMpeakDebug())
-    #data_processors.append(PlotMemRSSAndSharedDebug())
-    #data_processors.append(PlotCompareCompileTimeWithBenchmarking())
-
-    #processor = PlotMemRSS()
-    #data_processors.append(processor)
-
-    #data_processors.append(PlotPlainSeqErrorByIteration())
-    #data_processors.append(PlotCompileTimeErrorByIteration())
-
-    #processor_plain_time_by_date = PlotPlainManagerTimeByDate()
-    #data_processors.append(processor_plain_time_by_date)
-
-    #processor_compile_time_by_date = PlotCompileTimeByDate()
-    #data_processors.append(processor_compile_time_by_date)
-
-    #data_processors.append(PlotCompileTimeByIteration())
-    #data_processors.append(PlotPlainManagerTimeByIteration())
-    #data_processors.append(PlotPlainManagerTimeByIteration())
-
-    #data_processors.append(PlotCompare2InputsPlainSeqErrorByIteration())
-    #data_processors.append(PlotCompare2InputsCompileTimeByIteration())
-    #data_processors.append(PlotCompare2InputsPlainSeqErrorByTime(10.0))
-
-    #data_processors.append(PlotCompareMultipleInputsPlainSeqErrorByIteration())
-    #data_processors.append(PlotCompareMultipleInputsCompileTimeErrorByIteration())
-
-    data_processors.append(PlotCompareMultipleInputsTransformationErrorByIteration())
-    '''
-    model_info = ModelInfo('PT', 'llama-3-8b-instruct', 'INT8-CW', 'OV_FP16-INT8_ASYM')
-    ts_name = 'ov::pass::RoPEFusion'
-    manager_name = 'CPU:PostLPT'
-    data_processors.append(PlotTransformationByIteration(model_info, ts_name, manager_name))
-    '''
+    #data_processors.append(PlotPlainSeqScatterColors())
+    #data_processors.append(PlotCompileTimeScatterColors())
 
     return data_processors
 
