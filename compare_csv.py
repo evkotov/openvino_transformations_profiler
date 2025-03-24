@@ -1548,15 +1548,8 @@ class PlotTransformationByIteration(DataProcessor):
                                  f'{device}_{self.ts_name}_{self.manager_name}_ts_by_iteration_multi_inputs', 'number of iterations', '%')
 '''
 
-def process_deltas(data: Dict[ModelInfo, Dict[int, float]]):
-    model_deltas = []
-    for model_info in data:
-        model_data = data[model_info]
-        delta = model_data[18] - model_data[17]
-        model_deltas.append((model_info, delta))
-    sorted_model_deltas = sorted(model_deltas, key=lambda x: x[1], reverse=True)
-    for i, (model_info, delta) in enumerate(sorted_model_deltas):
-        print(f'{model_info}: {delta}')
+
+
 
 
 class PlotPlainSeqScatterColors(DataProcessor):
@@ -1564,13 +1557,12 @@ class PlotPlainSeqScatterColors(DataProcessor):
         super().__init__(None)
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
-        def normalize(data: Dict[ModelInfo, Dict[int, float]]) -> Dict[ModelInfo, Dict[int, float]]:
-            main_median = np.median([np.median(list(plain_times[model_info].values())) for model_info in data.keys()])
+        def get_ratio(data: Dict[ModelInfo, Dict[int, float]]) -> Dict[ModelInfo, Dict[int, float]]:
             for model_info in data:
                 times = [x for x in data[model_info].values()]
                 median = np.median(times)
                 for i in data[model_info].keys():
-                    data[model_info][i] = (data[model_info][i] - median) + main_median
+                    data[model_info][i] = (data[model_info][i]/median - 1.0) * 100.0
             return data
 
         def get_common_models(csv_data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]:
@@ -1580,19 +1572,20 @@ class PlotPlainSeqScatterColors(DataProcessor):
                 common_models &= model_info
             return list(common_models)
 
+        def get_plain_time(models, csv_data):
+            plain_times = {}
+            for i in range(len(csv_data)):
+                csv_data_d = csv_data[i]
+                for model_info in models:
+                    model_data = csv_data_d[model_info]
+                    if model_info not in plain_times:
+                        plain_times[model_info] = {}
+                    plain_times[model_info][i] = model_data.get_manager_plain_sequence_median_sum()
+            return plain_times
+
         common_models = get_common_models(csv_data)
-        plain_times = {}
-        for i in range(len(csv_data)):
-            csv_data_d = csv_data[i]
-            for model_info in common_models:
-                model_data = csv_data_d[model_info]
-                if model_info not in plain_times:
-                    plain_times[model_info] = {}
-                plain_times[model_info][i] = model_data.get_manager_plain_sequence_median_sum() / 1_000_000_000
-
-        process_deltas(plain_times)
-
-        plain_times = normalize(plain_times)
+        plain_times = get_plain_time(common_models, csv_data)
+        ratios = get_ratio(plain_times)
 
         N = len(csv_data)
         M = len(common_models)
@@ -1602,16 +1595,13 @@ class PlotPlainSeqScatterColors(DataProcessor):
         X, Y = np.meshgrid(x, y)
         values = np.full((len(common_models), len(csv_data)), np.nan)
         for i, model_info in enumerate(common_models):
-            for index, value in plain_times[model_info].items():
+            for index, value in ratios[model_info].items():
                 values[i, index] = value
 
         device = get_device(csv_data)
-        gen_plot_scatter_colors('.', X, Y, values, f'{device} sum transformations',
+        gen_plot_scatter_colors('.', X, Y, values, f'{device} sum of transformations',
                                 f'{device}_sum_ts',
-                                'nightly job', 'model')
-
-
-
+                                'nightly job', 'model', '(one nightly/all nightly median - 1), %')
 
 
 class PlotCompileTimeScatterColors(DataProcessor):
@@ -1619,13 +1609,12 @@ class PlotCompileTimeScatterColors(DataProcessor):
         super().__init__(None)
 
     def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
-        def normalize(data: Dict[ModelInfo, Dict[int, float]]) -> Dict[ModelInfo, Dict[int, float]]:
-            main_median = np.median([np.median(list(plain_times[model_info].values())) for model_info in data.keys()])
+        def get_ratio(data: Dict[ModelInfo, Dict[int, float]]) -> Dict[ModelInfo, Dict[int, float]]:
             for model_info in data:
                 times = [x for x in data[model_info].values()]
                 median = np.median(times)
                 for i in data[model_info].keys():
-                    data[model_info][i] = (data[model_info][i] - median) + main_median
+                    data[model_info][i] = (data[model_info][i]/median - 1.0) * 100.0
             return data
 
         def get_common_models(csv_data: List[Dict[ModelInfo, ModelData]]) -> List[ModelInfo]:
@@ -1635,19 +1624,20 @@ class PlotCompileTimeScatterColors(DataProcessor):
                 common_models &= model_info
             return list(common_models)
 
+        def get_compile_time(models, csv_data):
+            plain_times = {}
+            for i in range(len(csv_data)):
+                csv_data_d = csv_data[i]
+                for model_info in models:
+                    model_data = csv_data_d[model_info]
+                    if model_info not in plain_times:
+                        plain_times[model_info] = {}
+                    plain_times[model_info][i] = model_data.get_compile_time()
+            return plain_times
+
         common_models = get_common_models(csv_data)
-        plain_times = {}
-        for i in range(len(csv_data)):
-            csv_data_d = csv_data[i]
-            for model_info in common_models:
-                model_data = csv_data_d[model_info]
-                if model_info not in plain_times:
-                    plain_times[model_info] = {}
-                plain_times[model_info][i] = model_data.get_compile_time() / 1_000_000_000
-
-
-
-        plain_times = normalize(plain_times)
+        plain_times = get_compile_time(common_models, csv_data)
+        ratios = get_ratio(plain_times)
 
         N = len(csv_data)
         M = len(common_models)
@@ -1657,13 +1647,13 @@ class PlotCompileTimeScatterColors(DataProcessor):
         X, Y = np.meshgrid(x, y)
         values = np.full((len(common_models), len(csv_data)), np.nan)
         for i, model_info in enumerate(common_models):
-            for index, value in plain_times[model_info].items():
+            for index, value in ratios[model_info].items():
                 values[i, index] = value
 
         device = get_device(csv_data)
         gen_plot_scatter_colors('.', X, Y, values, f'{device} compile time',
                                 f'{device}_compile_time',
-                                'nightly job', 'model')
+                                'nightly job', 'model', '(one nightly/all nightly median - 1), %')
 
 
 @dataclass

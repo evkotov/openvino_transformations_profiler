@@ -233,8 +233,9 @@ def get_sum_units_comparison_data(data: List[Dict[ModelInfo, ModelData]], unit_t
                 total_list_by_unit_name[name] = []
             for item in total_by_unit_names_by_csv:
                 if name not in item:
-                    continue
-                total_list_by_unit_name[name].append(item[name])
+                    total_list_by_unit_name[name].append(None)
+                else:
+                    total_list_by_unit_name[name].append(item[name])
         yield model_info, total_list_by_unit_name
 
 
