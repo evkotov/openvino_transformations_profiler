@@ -1656,6 +1656,133 @@ class PlotCompileTimeScatterColors(DataProcessor):
                                 'nightly job', 'model', '(one nightly/all nightly median - 1), %')
 
 
+class FindDegradation(DataProcessor, ABC):
+    def __init__(self):
+        super().__init__(None)
+
+    @abstractmethod
+    def get_measurements(self, data: ModelData) -> List[float]:
+        pass
+
+    @abstractmethod
+    def get_output_file_name(self, device: str) -> str:
+        pass
+
+    def get_model_data_median(self, data: Optional[ModelData], i: int) -> Optional[float]:
+        if data is None:
+            return None
+        seqs = self.get_measurements(data)
+        if len(seqs) < i:
+            return None
+        median = np.median(seqs[:i])
+        assert not np.isnan(median)
+        assert median != 0.0
+        return float(median)
+
+    def generate_thresholds(self) -> List[float]:
+        thresholds = []
+        threshold = 5.0
+        while threshold < 100.0:
+            thresholds.append(threshold)
+            threshold += 0.5
+        return thresholds
+
+    def generate_iterations(self) -> List[float]:
+        return list(range(1, 11, 2))
+
+    def run(self, csv_data: List[Dict[ModelInfo, ModelData]]) -> None:
+        device = get_device(csv_data)
+
+        deltas_by_iteration = {} # key - num of iterations, value - list of deltas
+
+        iterations = self.generate_iterations()
+
+        for model_info, model_data_items in full_join_by_model_info(csv_data):
+            assert len(model_data_items) == len(csv_data)
+            for csv_idx in range(1, len(model_data_items)):
+                for n_iter in iterations:
+                    median_i_0 = self.get_model_data_median(model_data_items[csv_idx - 1], n_iter)
+                    median_i_1 = self.get_model_data_median(model_data_items[csv_idx], n_iter)
+                    if median_i_0 is None or median_i_1 is None:
+                        continue
+                    avg = (median_i_1 + median_i_0) / 2.0
+                    delta = 100.0 * (median_i_1 - median_i_0) / avg
+                    if n_iter not in deltas_by_iteration:
+                        deltas_by_iteration[n_iter] = []
+                    deltas_by_iteration[n_iter].append(delta)
+
+        thresholds = self.generate_thresholds()
+
+        count_by_iteration = {} # key - num of iterations, value : Dict[threshold, count]
+        for n_iter, deltas in deltas_by_iteration.items():
+            if n_iter not in count_by_iteration:
+                count_by_iteration[n_iter] = {}
+            for threshold in thresholds:
+                count = sum(1 for x in deltas if x > threshold)
+                count_by_iteration[n_iter][threshold] = count
+
+        header = ['threshold, %']
+        for n_iter in iterations:
+            header.append(f'first {n_iter} iterations')
+        table = []
+        for threshold in thresholds:
+            row = {'threshold, %': threshold}
+            for n_iter, counts in count_by_iteration.items():
+                row[f'first {n_iter} iterations'] = counts[threshold]
+            table.append(row)
+        with CSVOutput(self.get_output_file_name(device), header, None) as csv_file:
+            csv_file.write(table)
+
+
+class FindCompileTimeDegradation(FindDegradation):
+    def __init__(self):
+        super().__init__()
+
+    def get_measurements(self, data: ModelData) -> List[float]:
+        return data.get_compile_time_by_iteration()
+
+    def get_output_file_name(self, device: str) -> str:
+        return f'{device}_compile_time_error_table_by_iteration.csv'
+
+
+class FindTransformationSumDegradation(FindDegradation):
+    def __init__(self):
+        super().__init__()
+
+    def get_measurements(self, data: ModelData) -> List[float]:
+        return data.get_manager_plain_sequence_sum_by_iteration()
+
+    def get_output_file_name(self, device: str) -> str:
+        return f'{device}_ts_sum_error_table_by_iteration.csv'
+
+
+class FindMemoryDegradation(FindDegradation):
+    def __init__(self):
+        super().__init__()
+
+    def get_measurements(self, data: ModelData) -> List[float]:
+        return []
+
+    def get_output_file_name(self, device: str) -> str:
+        return f'{device}_memory_error_table_by_iteration.csv'
+
+    def get_model_data_median(self, data: Optional[ModelData], i: int) -> Optional[float]:
+        if data is None:
+            return None
+        return data.get_mem_rss()
+
+    def generate_thresholds(self) -> List[float]:
+        thresholds = []
+        threshold = 0.2
+        while threshold < 20.0:
+            thresholds.append(threshold)
+            threshold += 0.2
+        return thresholds
+
+    def generate_iterations(self) -> List[float]:
+        return [1]
+
+
 @dataclass
 class Config:
     compare_compile_time = None
@@ -2212,8 +2339,9 @@ def build_data_processors(config):
                                                       'compare memory virtual')
         data_processors.append(CompareMemVirtual(output_factory))
 
-    #data_processors.append(PlotPlainSeqScatterColors())
-    #data_processors.append(PlotCompileTimeScatterColors())
+    #data_processors.append(FindCompileTimeDegradation())
+    #data_processors.append(FindTransformationSumDegradation())
+    #data_processors.append(FindMemoryDegradation())
 
     return data_processors
 
